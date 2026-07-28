@@ -1,0 +1,36 @@
+[project]
+name = "ims-crew"
+version = "0.2.0"
+description = "CrewAI 多 Agent 软件团队 — 自动生成进销存管理系统"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "AI Software Team", email = "dev@ims-crew.example.com" },
+]
+
+dependencies = [
+    "crewai>=0.100.0",
+    "crewai-tools>=0.0.10",
+    "pyyaml>=6.0",
+    "httpx>=0.27.0",
+]
+
+[project.scripts]
+ims-crew = "ims_crew.main:run"
+ims-train = "ims_crew.main:train"
+
+[project.urls]
+Homepage = "https://github.com/example/ims-crew"
+Documentation = "https://github.com/example/ims-crew#readme"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"

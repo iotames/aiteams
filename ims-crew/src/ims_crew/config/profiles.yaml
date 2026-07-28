@@ -1,0 +1,49 @@
+# 团队 Profile 配置
+# 定义不同的团队组合，用于不同场景下的生成任务
+#
+# 使用方式:
+#   uv run ims-crew --profile full          # 完整团队
+#   uv run ims-crew --profile backend-only   # 仅后端
+#   uv run ims-crew --profile prototype      # 快速原型
+
+profiles:
+  full:
+    description: "完整软件开发团队 — 6 角色全流程"
+    agents:
+      - product_manager
+      - architect
+      - backend_developer
+      - frontend_developer
+      - qa_engineer
+      - devops_engineer
+    tasks:
+      - requirement_analysis
+      - system_design
+      - backend_development
+      - frontend_development
+      - testing
+      - deployment
+
+  backend-only:
+    description: "仅后端开发 — 4 角色 (PM + 架构 + 后端 + QA)"
+    agents:
+      - product_manager
+      - architect
+      - backend_developer
+      - qa_engineer
+    tasks:
+      - requirement_analysis
+      - system_design
+      - backend_development
+      - testing
+
+  prototype:
+    description: "快速原型 — 3 角色 (架构 + 后端 + 前端)"
+    agents:
+      - architect
+      - backend_developer
+      - frontend_developer
+    tasks:
+      - system_design
+      - backend_development
+      - frontend_development
