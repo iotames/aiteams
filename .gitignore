@@ -21,6 +21,7 @@ env/
 # ── 生成的代码产物 ────────────────────────────
 output/
 project/
+workspace/                     # ims-metagpt 工作区输出
 
 # ── 训练数据 ──────────────────────────────────
 *.pkl
@@ -32,7 +33,9 @@ project/
 .idea/
 *.swp
 *.swo
+reasonix.toml
 *~
+*.orig                         # Git 合并产生的备份文件
 
 # ── OS ────────────────────────────────────────
 .DS_Store

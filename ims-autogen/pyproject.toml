@@ -1,0 +1,17 @@
+[project]
+name = "ims-autogen"
+version = "0.1.0"
+description = "基于 AutoGen 的多 Agent 对话式软件团队 — 进销存管理系统生成器"
+requires-python = ">=3.11"
+dependencies = [
+    "autogen-agentchat>=0.4.0",
+    "autogen-ext[openai]>=0.4.0",
+    "typer>=0.12",
+    "python-dotenv>=1.0",
+]
+
+[project.scripts]
+ims-autogen = "ims_autogen.main:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
