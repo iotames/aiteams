@@ -1,0 +1,48 @@
+# ============================================================
+# MetaGPT 全局配置 — ims-metagpt 项目
+# ============================================================
+# 将此文件复制到 ~/.metagpt/config2.yaml 或项目根目录
+# 完整参考: https://github.com/geekan/MetaGPT/blob/main/config/config2.example.yaml
+# ============================================================
+
+# ---------- LLM 配置（三厂商示例）----------
+# 根据你的 API Key 情况，取消注释其中一组即可
+
+# --- 方案 A：OpenAI ---
+# llm:
+#   api_type: "openai"
+#   model: "gpt-4-turbo"        # 或 gpt-4o / gpt-3.5-turbo
+#   base_url: "https://api.openai.com/v1"
+#   api_key: "${OPENAI_API_KEY}" # 从环境变量读取
+#   proxy: ""                    # 如需代理，如 "http://127.0.0.1:7890"
+
+# --- 方案 B：DeepSeek（推荐，性价比高）---
+# llm:
+#   api_type: "deepseek"
+#   model: "deepseek-chat"
+#   base_url: "https://api.deepseek.com/v1"
+#   api_key: "${DEEPSEEK_API_KEY}"
+
+# --- 方案 C：Ollama（本地部署）---
+# llm:
+#   api_type: "ollama"
+#   model: "qwen2.5:14b"       # 或 llama3 / deepseek-r1 等
+#   base_url: "http://localhost:11434/api"
+
+# ---------- 工作区配置 ----------
+workspace:
+  # 生成的代码输出目录（相对或绝对路径）
+  path: "./workspace"
+
+# ---------- 搜索配置（可选）----------
+# search:
+#   api_type: "google"
+#   api_key: "${GOOGLE_API_KEY}"
+#   cse_id: "${GOOGLE_CSE_ID}"
+
+# ---------- RAG 嵌入配置（可选）----------
+# embedding:
+#   api_type: "openai"
+#   model: "text-embedding-3-small"
+#   base_url: "https://api.openai.com/v1"
+#   api_key: "${OPENAI_API_KEY}"
