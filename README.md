@@ -4,10 +4,12 @@
 
 ## 团队目录
 
-| 团队 | 技术栈 | 场景 |
-|------|--------|------|
-| [ims-crew](./ims-crew/) | CrewAI | 进销存管理系统自动生成（MVP + 迭代） |
-| [ims-metagpt](./ims-metagpt/) | MetaGPT | 进销存管理系统自动生成（完整软件生命周期：MVP → 迭代 → 重构） |
+| 团队 | 技术栈 | 场景 | 特色 |
+|------|--------|------|------|
+| [ims-autogen](./ims-autogen/) | **AutoGen v0.4+** | 进销存管理系统（对话式） | 🤝 双向对话、人工在环、实时问答 |
+| [ims-metagpt](./ims-metagpt/) | MetaGPT | 进销存管理系统（完整生命周期） | MVP → 迭代 → 重构三段式 |
+| [ims-crew](./ims-crew/) | CrewAI | 进销存管理系统（串行流水线） | 角色流水线、MVP + 迭代 |
+| [oh-my-openagent](./oh-my-openagent/) | — | Agent 角色 Prompt 参考库 | 11 个预定义角色的原始 system prompt |
 
 ## 设计原则
 
@@ -22,17 +24,30 @@
 aiteams/
 ├── README.md              # 本文件
 ├── .gitignore             # 全局忽略规则
-├── ims-crew/              # 进销存系统开发团队（CrewAI）
-│   ├── prompts/           # 提示词文件（.md）
-│   ├── src/               # 源代码
-│   └── README.md          # 团队使用说明
+├── ims-autogen/           # 进销存系统开发团队（AutoGen）
+│   ├── src/ims_autogen/   # 源代码
+│   │   ├── main.py        # CLI 入口（typer）
+│   │   ├── config.py      # 统一配置（多层覆盖）
+│   │   ├── agents.py      # 5 角色 Agent 工厂
+│   │   ├── team.py        # SelectorGroupChat 组装
+│   │   ├── tools.py       # 工具函数
+│   │   ├── prompt_loader.py  # 提示词动态加载
+│   │   └── prompts/       # 角色提示词（.md）
+│   ├── .env.example       # 环境配置模板
+│   ├── README.md          # 使用说明
+│   └── TUTORIAL.md        # 八章学习教程（新手必读）
 ├── ims-metagpt/           # 进销存系统开发团队（MetaGPT）
 │   ├── prompts/           # 提示词文件（.md，可单独编辑）
 │   ├── src/               # 源代码
 │   ├── config/            # LLM 配置（多厂商示例）
 │   ├── README.md          # 团队使用说明
-│   └── TUTORIAL.md        # 学习教程（新手必读）
-└── oh-my-openagent/       # 通用 Agent 角色定义文件集合
+│   └── TUTORIAL.md        # 学习教程
+├── ims-crew/              # 进销存系统开发团队（CrewAI）
+│   ├── prompts/           # 提示词文件（.md）
+│   ├── src/               # 源代码
+│   └── README.md          # 团队使用说明
+└── oh-my-openagent/       # Agent 角色 Prompt 参考库
+    └── README.md          # 提取说明
 ```
 
 ## 快速开始
@@ -40,22 +55,31 @@ aiteams/
 每个团队独立运行，进入对应目录查看各自的 README：
 
 ```bash
-# CrewAI 版本
-cd ims-crew
+# AutoGen 版本（双向对话 + 人工在环，推荐尝鲜）
+cd ims-autogen
 cat README.md
+cat TUTORIAL.md   # 八章教程，从零开始
 
-# MetaGPT 版本（推荐新手从此开始）
+# MetaGPT 版本（完整软件生命周期）
 cd ims-metagpt
 cat README.md
-cat TUTORIAL.md   # 六章学习教程，从零开始
+cat TUTORIAL.md   # 六章教程
+
+# CrewAI 版本（串行流水线）
+cd ims-crew
+cat README.md
 ```
 
-## 两个 IMS 团队的区别
+## 三个 IMS 团队的区别
 
-| 维度 | ims-crew (CrewAI) | ims-metagpt (MetaGPT) |
-|------|-------------------|----------------------|
-| 底层框架 | CrewAI | MetaGPT |
-| 软件生命周期 | 单次生成 | MVP → 迭代 → 重构（完整周期） |
-| 人工审核环节 | 无 | plan→design→code 三段式审核 |
-| 提示词管理 | `.md` 文件 | `.md` 文件 + 动态加载器 |
-| 学习曲线 | 较低 | 中等（附完整教程） |
+| 维度 | ims-autogen (AutoGen) | ims-metagpt (MetaGPT) | ims-crew (CrewAI) |
+|------|----------------------|----------------------|-------------------|
+| 对话方式 | **🤝 双向对话** | 单向接力 | 串行流水线 |
+| 发言调度 | **SelectorGroupChat（模型决策）** | Environment 广播 | Sequential Process |
+| 人工参与 | **✅ 终端内实时问答** | ❌ 事后审文件 | ❌ |
+| 开发问架构师 | ✅ | ❌ | ❌ |
+| 测试→修 bug 循环 | ✅ | ❌ | ❌ |
+| 产品验收 | ✅ | ❌ | ❌ |
+| CLI 方式 | 一条命令 `run` | 分步 `plan → design → code` | 一条命令 |
+| 学习曲线 | 中等（附八章教程） | 中等（附六章教程） | 较低 |
+| 适用场景 | 需求不明确、需频繁沟通 | 需求明确、完整交付 | 快速原型 |
