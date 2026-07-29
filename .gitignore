@@ -25,7 +25,9 @@ project/
 # ── 训练数据 ──────────────────────────────────
 *.pkl
 
-# ── IDE / 编辑器 ─────────────────────────────
+# ── IDE / 编辑器 / AI 工具 ─────────────────────────────
+.reasonix/
+.crush/
 .vscode/
 .idea/
 *.swp
@@ -42,5 +44,3 @@ Thumbs.db
 .pytest_cache/
 .ruff_cache/
 
-# ── Reasonix（AI 辅助配置） ─────────────────
-.reasonix/
