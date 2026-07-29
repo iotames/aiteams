@@ -11,7 +11,7 @@
 - 所有 API 调用使用 fetch API
 - JWT Token 存储在 localStorage
 - 响应式布局，适配桌面和移动端
-- 不依赖任何构建工具（webpack/vite 等）
+- 不依赖任何构建工具（npm/webpack/vite 等）
 
 ## 输出格式
 每个文件之间用 `---` 分隔：

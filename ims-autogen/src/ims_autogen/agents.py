@@ -4,12 +4,30 @@
 编辑 prompts/ 下的 .md 文件即可调整 Agent 行为，无需修改 Python 代码。
 """
 
+import re
+
 from autogen_agentchat.agents import AssistantAgent, UserProxyAgent
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 
 from . import tools
 from .config import get_config
 from .prompt_loader import load as load_prompt
+
+
+# ── 安全的用户输入 ──────────────────────────────────────
+# 在 Windows 终端中，input() 可能产生 UTF-8 非法的代理对字符（如 \udce6），
+# 导致 OpenAI API 序列化时报 UnicodeEncodeError。这里在入口处过滤掉。
+
+_SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
+
+
+def _safe_input(prompt: str = "") -> str:
+    """安全的 input 封装：过滤掉代理对字符。"""
+    try:
+        raw = input(prompt)
+        return _SURROGATE_RE.sub("", raw)
+    except (EOFError, KeyboardInterrupt):
+        return ""
 
 
 def _model_client(role_prefix: str = "") -> OpenAIChatCompletionClient:
@@ -24,9 +42,9 @@ def _model_client(role_prefix: str = "") -> OpenAIChatCompletionClient:
     return OpenAIChatCompletionClient(**mc.to_client_kwargs())
 
 
-def create_product_manager(scope: str = "MVP") -> AssistantAgent:
+def create_product_manager() -> AssistantAgent:
     """创建产品经理 Alice。"""
-    prompt = load_prompt("product_manager", scope=scope)
+    prompt = load_prompt("product_manager")
     return AssistantAgent(
         name="product_manager",
         description="产品经理 Alice — 负责需求澄清、撰写 PRD、验收产品",
@@ -38,9 +56,9 @@ def create_product_manager(scope: str = "MVP") -> AssistantAgent:
     )
 
 
-def create_architect(scope: str = "MVP") -> AssistantAgent:
+def create_architect() -> AssistantAgent:
     """创建架构师 Bob。"""
-    prompt = load_prompt("architect", scope=scope)
+    prompt = load_prompt("architect")
     return AssistantAgent(
         name="architect",
         description="架构师 Bob — 负责系统架构设计和技术决策",
@@ -52,9 +70,9 @@ def create_architect(scope: str = "MVP") -> AssistantAgent:
     )
 
 
-def create_developer(scope: str = "MVP") -> AssistantAgent:
+def create_developer() -> AssistantAgent:
     """创建全栈工程师 Eve。"""
-    prompt = load_prompt("developer", scope=scope)
+    prompt = load_prompt("developer")
     return AssistantAgent(
         name="developer",
         description="全栈工程师 Eve — 负责后端和前端代码实现",
@@ -66,9 +84,9 @@ def create_developer(scope: str = "MVP") -> AssistantAgent:
     )
 
 
-def create_qa(scope: str = "MVP") -> AssistantAgent:
+def create_qa() -> AssistantAgent:
     """创建测试工程师 Charlie。"""
-    prompt = load_prompt("qa", scope=scope)
+    prompt = load_prompt("qa")
     return AssistantAgent(
         name="qa",
         description="测试工程师 Charlie — 负责编写测试、执行测试、报告 bug",
@@ -85,5 +103,5 @@ def create_user_proxy() -> UserProxyAgent:
     return UserProxyAgent(
         name="human_user",
         description="真人用户 — 回答产品经理的提问、提供需求决策",
-        input_func=input,
+        input_func=_safe_input,
     )

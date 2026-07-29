@@ -320,13 +320,12 @@ team = SelectorGroupChat(
 def cmd_run(
     idea: str = typer.Argument(..., help="需求描述"),
     workspace: str = typer.Option("./ims-output", "--workspace", "-w"),
-    scope: str = typer.Option("MVP", "--scope", "-s"),
 ):
 ```
 
 执行流程：
 1. 创建工作区目录，设置环境变量 `IMS_WORKSPACE`
-2. 调用 `build_team(scope=scope)` 组装团队，解包返回 `(team, clients)`
+2. 调用 `build_team()` 组装团队，解包返回 `(team, clients)`
 3. `asyncio.run(_run_team(team, idea, clients))` 启动对话
 4. `_run_team()` 内部调用 `Console(team.run_stream(task=task), output_stats=True)` 流式输出
 5. **finally 块关闭所有 model_client**，确保连接和线程资源得到释放
@@ -382,9 +381,9 @@ class AppConfig:
 `agents.py` 提供 5 个工厂函数，每个函数做三件事（以 `create_product_manager` 为例）：
 
 ```python
-def create_product_manager(scope: str = "MVP") -> AssistantAgent:
+def create_product_manager() -> AssistantAgent:
     # 1. 从 prompts/ 目录动态加载提示词（不是硬编码）
-    prompt = load_prompt("product_manager", scope=scope)
+    prompt = load_prompt("product_manager")
     return AssistantAgent(
         name="product_manager",            # 团队内唯一标识
         description="产品经理 Alice...",     # 帮助选择器理解角色
@@ -420,13 +419,13 @@ def _model_client(role_prefix: str = "") -> OpenAIChatCompletionClient:
 `build_team()` 函数组装整个团队，返回 `(team, clients)` 元组：
 
 ```python
-def build_team(scope: str = "MVP") -> tuple[SelectorGroupChat, list]:
+def build_team() -> tuple[SelectorGroupChat, list]:
     cfg = get_config()
     # 创建全部 5 个 Agent
-    pm = create_product_manager(scope)
-    architect = create_architect(scope)
-    dev = create_developer(scope)
-    qa = create_qa(scope)
+    pm = create_product_manager()
+    architect = create_architect()
+    dev = create_developer()
+    qa = create_qa()
     user = create_user_proxy()
 
     participants = [pm, architect, dev, qa, user]
@@ -489,7 +488,7 @@ run_command(command)       # 执行 shell 命令（用于运行测试），带�
 ```
 你的终端输入: ims-autogen run "生成进销存" -w ./output
           │
-    main.py: build_team("MVP") → (team, clients)
+    main.py: build_team() → (team, clients)
           │
     config.py: get_config() → AppConfig（多层覆盖）
           │
@@ -530,7 +529,7 @@ run_command(command)       # 执行 shell 命令（用于运行测试），带�
 
 保存后重新运行 `ims-autogen run`，新规则自动生效。
 
-> 为什么不需要改代码？因为 `agents.py` 中 `create_product_manager()` 通过 `load_prompt("product_manager", scope=scope)` 动态加载文件内容。
+> 为什么不需要改代码？因为 `agents.py` 中 `create_product_manager()` 通过 `load_prompt("product_manager")` 动态加载文件内容。
 
 ### 7.2 新增一个角色：运维工程师
 
@@ -543,15 +542,13 @@ run_command(command)       # 执行 shell 命令（用于运行测试），带�
 - 阅读架构设计，编写 Docker 部署方案
 - 使用 save_file 保存 deploy/docker-compose.yml
 - 回答团队关于部署环境的问题
-
-当前范围：{{scope}}
 ```
 
 **第二步**：在 `agents.py` 中添加工厂函数（参照 `create_product_manager()` 的模式）
 
 ```python
-def create_devops(scope: str = "MVP") -> AssistantAgent:
-    prompt = load_prompt("devops", scope=scope)
+def create_devops() -> AssistantAgent:
+    prompt = load_prompt("devops")
     return AssistantAgent(
         name="devops",
         description="运维工程师 David — 负责部署和环境配置",
@@ -613,7 +610,7 @@ prompts/en/
 └── qa.md
 ```
 
-然后调用 `load_prompt("product_manager", lang="en", scope="Full")`，`prompt_loader.py` 的 `_resolve_path()` 会优先查找 `prompts/en/product_manager.md`。
+然后调用 `load_prompt("product_manager", lang="en")`，`prompt_loader.py` 的 `_resolve_path()` 会优先查找 `prompts/en/product_manager.md`。
 
 ---
 

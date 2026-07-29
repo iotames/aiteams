@@ -57,8 +57,7 @@ MODEL_NAME=deepseek-chat
 ### 3. 启动对话式开发
 
 ```bash
-# MVP 模式：生成核心功能（商品管理+库存管理）
-ims-autogen run "生成一个进销存管理系统" -w ./my-ims --scope MVP
+ims-autogen run "生成一个进销存管理系统" -w ./my-ims
 ```
 
 启动后你会看到：
@@ -132,7 +131,7 @@ Alice 审查 → 验收通过 → FINAL_ACCEPT
 
 **用法：**
 ```bash
-ims-autogen run <IDEA> [--workspace] [--scope]
+ims-autogen run <IDEA> [--workspace] [--resume]
 ```
 
 **参数详解：**
@@ -141,18 +140,31 @@ ims-autogen run <IDEA> [--workspace] [--scope]
 |---|---|---|---|---|
 | `IDEA` | 位置参数 | ✅ | — | 你的需求描述文本，用引号包裹。例：`"生成进销存系统"` |
 | `-w` / `--workspace` | 选项 | ❌ | `./ims-output` | 输出目录路径。所有生成的文件（代码、文档）都保存在此目录下 |
-| `-s` / `--scope` | 选项 | ❌ | `MVP` | 功能范围。可选值：`MVP`（核心功能）/ `Full`（完整功能） |
+| `-r` / `--resume` | 标志 | ❌ | `False` | **续传模式**。基于工作区已有产物继续，不从头开始 |
+
+**续传模式说明：**
+如果流程因报错或中断提前结束，但已有部分产出（如 `prd.md`），加上 `--resume` 续传：
+
+```bash
+# 续传：团队会读取已有文件，在此进度上继续
+ims-autogen run "继续进销存系统" -w ./my-ims --resume
+
+# 补充内容
+ims-autogen run "项目已完成开发，但缺少 README.md，请补充" -w ./ims-output --resume
+
+# 基于已有代码继续迭代
+ims-autogen run "完善项目，补充采购管理和报表功能" -w ./ims-output --resume
+```
+
+续传时，系统会自动扫描工作区文件，将已有产物摘要注入到初始消息中，AI 团队会根据当前进度继续后续工作。
 
 **示例：**
 ```bash
-# 最简用法（所有选项用默认值）
+# 最简用法。默认在 ims-output 目录下生成代码
 ims-autogen run "生成进销存系统"
 
 # 指定输出目录
 ims-autogen run "生成一个进销存管理系统，先做商品和库存" -w ./my-project
-
-# Full 范围模式
-ims-autogen run "生成进销存系统，含采购销售报表" -w ./my-ims --scope Full
 ```
 
 ---

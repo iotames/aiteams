@@ -30,6 +30,37 @@ app = typer.Typer(
 )
 
 
+def _build_resume_context(ws_path: Path) -> str | None:
+    """扫描工作区已有产物，构建续传上下文。
+
+    检查工作区中已有的文件，生成一个进度摘要，
+    让团队知道哪些工作已完成，哪些还需要继续。
+    """
+    existing = sorted(ws_path.rglob("*"))
+    files = [f for f in existing if f.is_file()]
+    if not files:
+        return None
+
+    parts = [
+        "【项目续传】以下文件已存在，请在此进度基础上继续完成剩余工作：\n"
+    ]
+    for f in files:
+        rel = f.relative_to(ws_path)
+        try:
+            content = f.read_text(encoding="utf-8", errors="replace")
+            # 取非空前 3 行作为摘要
+            lines = [l.strip() for l in content.split("\n") if l.strip()][:3]
+            summary = " | ".join(lines) if lines else "(空文件)"
+            parts.append(f"- **{rel}**: {summary[:120]}")
+        except Exception:
+            parts.append(f"- **{rel}**: (无法读取)")
+
+    parts.append(
+        "\n请评估当前进度，继续完成未完成的工作（设计、编码、测试、验收）。"
+    )
+    return "\n".join(parts)
+
+
 @app.command("run", help="启动多 Agent 对话，交互式完成需求-设计-开发-测试-验收全流程")
 def cmd_run(
     idea: str = typer.Argument(
@@ -43,13 +74,10 @@ def cmd_run(
         help="输出目录，所有生成的文件保存在这里",
         rich_help_panel="路径选项",
     ),
-    scope: str = typer.Option(
-        "MVP",
-        "--scope", "-s",
-        help="""生成范围。
-          MVP  = 只生成核心功能（商品管理+库存管理），快速上线
-          Full = 完整功能（商品+采购+销售+库存+报表）
-        """,
+    resume: bool = typer.Option(
+        False,
+        "--resume", "-r",
+        help="续传模式：基于已有产物继续，不从头开始",
         rich_help_panel="模式选项",
     ),
 ):
@@ -64,12 +92,22 @@ def cmd_run(
     5. Alice 最终验收
 
     当 Alice 说 FINAL_ACCEPT 时流程结束。
-    MVP 验收通过后，Alice 会问你"是否继续完整版"——回答"是"则继续 Full 范围。
     """
     # ---------- 设置工作区 ----------
     ws_path = Path(workspace).absolute()
     ws_path.mkdir(parents=True, exist_ok=True)
     os.environ["IMS_WORKSPACE"] = str(ws_path)
+
+    # ---------- 构建初始任务消息 ----------
+    task = idea
+    if resume:
+        ctx = _build_resume_context(ws_path)
+        if ctx:
+            task = f"{idea}\n\n{ctx}"
+            typer.echo("📋 检测到已有产物，进入续传模式")
+            typer.echo("    AI 团队会基于已有文件继续完成剩余工作\n")
+        else:
+            typer.echo("⚠️  工作区为空，忽略 --resume，从头开始\n")
 
     # ---------- 打印启动信息 ----------
     typer.echo("")
@@ -77,7 +115,7 @@ def cmd_run(
     typer.echo("|  ims-autogen 多 Agent 对话式开发启动                       |")
     typer.echo("+----------------------------------------------------------+")
     typer.echo(f"|  需求: {idea[:60]}")
-    typer.echo(f"|  范围: {scope}")
+    typer.echo("|  模式: {}".format("续传" if resume else "全新"))
     typer.echo(f"|  输出: {ws_path}")
     typer.echo("+----------------------------------------------------------+")
     typer.echo("")
@@ -86,18 +124,15 @@ def cmd_run(
     typer.echo("")
 
     # ---------- 构建团队 ----------
-    team, clients = build_team(scope=scope)
+    team, clients = build_team()
 
     # ---------- 运行 ----------
     try:
-        asyncio.run(_run_team(team, idea, clients))
+        asyncio.run(_run_team(team, task, clients))
     except KeyboardInterrupt:
         typer.echo("\n\n用户中断，流程结束。")
         raise typer.Exit(code=1)
     except asyncio.CancelledError:
-        # asyncio.run() 会将 KeyboardInterrupt 转为 CancelledError，
-        # 但在 run() 外部通常已被还原为 KeyboardInterrupt。
-        # 保留此捕获以处理边界情况。
         typer.echo("\n\n流程被取消，正在清理...")
         raise typer.Exit(code=1)
     except Exception as e:
@@ -137,14 +172,12 @@ def cmd_list_modes():
     typer.echo("")
     typer.echo('  ims-autogen run "生成进销存系统" -w ./my-ims')
     typer.echo("")
-    typer.echo("  # MVP 模式（只生成核心功能）：")
-    typer.echo('  ims-autogen run "生成进销存系统" -w ./my-ims --scope MVP')
-    typer.echo("")
-    typer.echo("  # Full 模式（完整功能）：")
-    typer.echo('  ims-autogen run "生成进销存系统" -w ./my-ims --scope Full')
+    typer.echo("  # 续传模式（断点续传）：")
+    typer.echo('  ims-autogen run "继续完善项目" -w ./my-ims --resume')
     typer.echo("")
     typer.echo("所有命令：")
     typer.echo("  run          启动多 Agent 对话（交互式全流程）")
+    typer.echo("  run --resume 续传：基于已有产物继续，不从头开始")
     typer.echo("  list-modes   显示本帮助")
     typer.echo("")
     typer.echo("配置说明：")

@@ -44,12 +44,9 @@ SELECTOR_PROMPT = """你是一个多 Agent 软件开发团队的协调员。
 """
 
 
-def build_team(scope: str = "MVP") -> tuple[SelectorGroupChat, list]:
+def build_team() -> tuple[SelectorGroupChat, list]:
     """
     构建多 Agent 对话团队。
-
-    Args:
-        scope: 当前范围 "MVP" 或 "Full"
 
     Returns:
         (team, clients) — team 是配置好的 SelectorGroupChat，
@@ -58,10 +55,10 @@ def build_team(scope: str = "MVP") -> tuple[SelectorGroupChat, list]:
     cfg = get_config()
 
     # 创建所有 Agent
-    pm = create_product_manager(scope)
-    architect = create_architect(scope)
-    dev = create_developer(scope)
-    qa = create_qa(scope)
+    pm = create_product_manager()
+    architect = create_architect()
+    dev = create_developer()
+    qa = create_qa()
     user = create_user_proxy()
 
     participants = [pm, architect, dev, qa, user]

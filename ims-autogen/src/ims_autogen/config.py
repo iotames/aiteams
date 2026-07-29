@@ -34,6 +34,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional
 
+from autogen_core.models import ModelFamily
+
 
 # ── model_info 自动推断 ──────────────────────────────────
 
@@ -46,28 +48,28 @@ _MODEL_INFO_PRESETS: dict[str, dict] = {
         "vision": False,
         "function_calling": True,
         "json_output": False,
-        "family": "unknown",
+        "family": ModelFamily.UNKNOWN,
         "structured_output": True,
     },
     "claude": {
         "vision": False,
         "function_calling": True,
         "json_output": False,
-        "family": "unknown",
+        "family": ModelFamily.UNKNOWN,
         "structured_output": True,
     },
     "qwen": {
         "vision": False,
         "function_calling": True,
         "json_output": False,
-        "family": "unknown",
+        "family": ModelFamily.UNKNOWN,
         "structured_output": True,
     },
     "glm": {
         "vision": False,
         "function_calling": True,
         "json_output": False,
-        "family": "unknown",
+        "family": ModelFamily.UNKNOWN,
         "structured_output": True,
     },
 }
@@ -77,7 +79,7 @@ _UNKNOWN_MODEL_INFO: dict = {
     "vision": False,
     "function_calling": True,
     "json_output": False,
-    "family": "unknown",
+    "family": ModelFamily.UNKNOWN,
     "structured_output": False,
 }
 
