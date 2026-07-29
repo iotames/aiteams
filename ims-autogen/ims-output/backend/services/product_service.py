@@ -4,7 +4,7 @@
 from models import db
 from models.product import Product
 from models.category import Category
-from models.unit import Unit
+from models.product import Unit
 from models.purchase import PurchaseOrderItem
 from models.sale import SaleOrderItem
 
@@ -64,7 +64,7 @@ class ProductService:
             unit_id=data['unit_id'],
             purchase_price=data.get('purchase_price', 0),
             sale_price=data.get('sale_price', 0),
-            stock_low=data.get('stock_low', 0)
+            min_stock=data.get('min_stock', 0)
         )
         db.session.add(product)
         db.session.commit()
@@ -92,7 +92,7 @@ class ProductService:
                 raise ValueError('单位不存在')
 
         for key in ('name', 'code', 'category_id', 'unit_id',
-                     'purchase_price', 'sale_price', 'stock_low'):
+                     'purchase_price', 'sale_price', 'min_stock'):
             if key in data:
                 setattr(product, key, data[key])
 

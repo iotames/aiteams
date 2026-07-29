@@ -2,11 +2,11 @@
 
 from datetime import datetime, timedelta
 from sqlalchemy import desc, func
-from . import db
-from .models.product import Product
-from .models.stock import StockTransaction
-from .models.sale import SaleOrder, SaleOrderItem
-from .models.purchase import PurchaseOrder, PurchaseOrderItem
+from models import db
+from models.product import Product
+from models.stock import StockTransaction
+from models.sale import SaleOrder, SaleOrderItem
+from models.purchase import PurchaseOrder, PurchaseOrderItem
 
 
 class ReportService:
@@ -86,7 +86,7 @@ class ReportService:
     @staticmethod
     def get_sales_detail(start_date=None, end_date=None, page=1, per_page=20):
         """获取销售明细报表"""
-        query = SaleItemModel.query.join(SaleOrder)
+        query = SaleOrderItem.query.join(SaleOrder)
 
         if start_date:
             if isinstance(start_date, str):
@@ -98,7 +98,6 @@ class ReportService:
                 end_date = datetime.strptime(end_date + ' 23:59:59', '%Y-%m-%d %H:%M:%S')
             query = query.filter(SaleOrder.created_at <= end_date)
 
-        # 改用 SQLAlchemy 原生方式
         pagination = query.order_by(desc(SaleOrder.created_at)).paginate(
             page=page, per_page=per_page, error_out=False
         )
@@ -114,9 +113,9 @@ class ReportService:
                 'product_code': item.product.code if item.product else '',
                 'unit_name': item.product.unit.name if item.product and item.product.unit else '',
                 'quantity': item.quantity,
-                'shipped_quantity': item.shipped_quantity,
-                'unit_price': item.unit_price,
-                'subtotal': item.subtotal,
+                'shipped_quantity': item.quantity,
+                'unit_price': item.price,
+                'subtotal': item.amount,
                 'status': item.order.status if item.order else ''
             })
 

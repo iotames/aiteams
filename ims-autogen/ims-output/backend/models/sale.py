@@ -44,6 +44,7 @@ class SaleOrderItem(db.Model):
     order_id = Column(Integer, ForeignKey('sale_order.id'), nullable=False, comment='订单ID')
     product_id = Column(Integer, ForeignKey('product.id'), nullable=False, comment='商品ID')
     quantity = Column(Float, nullable=False, default=0.0, comment='数量')
+    shipped_quantity = Column(Float, default=0.0, comment='已出库数量')
     price = Column(Float, default=0.0, comment='单价')
     amount = Column(Float, default=0.0, comment='金额')
 
@@ -58,6 +59,7 @@ class SaleOrderItem(db.Model):
             'product_code': self.product.code if self.product else '',
             'unit_name': self.product.unit.name if self.product and self.product.unit else '',
             'quantity': self.quantity,
+            'shipped_quantity': self.shipped_quantity,
             'price': self.price,
             'amount': self.amount
         }

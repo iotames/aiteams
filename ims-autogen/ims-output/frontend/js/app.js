@@ -1583,5 +1583,6 @@
     });
 
     // 初始化路由
+    router.init('appContent');
     console.log('✅ 进销存管理系统 (IMS) 已加载');
 })();

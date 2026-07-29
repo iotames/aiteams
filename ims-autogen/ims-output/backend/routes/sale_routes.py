@@ -16,16 +16,10 @@ def list_sale_orders():
     keyword = request.args.get('keyword', '').strip() or None
 
     try:
-        orders, total = SaleService.get_order_list(
-            page=page, per_page=per_page, status=status, keyword=keyword
+        result = SaleService.get_orders(
+            page=page, per_page=per_page, status=status, search=keyword
         )
-        return success_response({
-            'items': [o.to_dict() for o in orders],
-            'total': total,
-            'page': page,
-            'per_page': per_page,
-            'pages': (total + per_page - 1) // per_page if per_page > 0 else 0
-        })
+        return success_response(result)
     except Exception as e:
         return error_response(str(e))
 
@@ -35,8 +29,7 @@ def create_sale_order():
     """创建销售订单"""
     data = request.get_json(silent=True) or {}
     try:
-        order, warnings = SaleService.create_order(data)
-        result = order.to_dict()
+        result, warnings = SaleService.create_order(data)
         if warnings:
             result['warnings'] = warnings
         return success_response(result, '销售订单创建成功' + ('（含库存预警）' if warnings else ''))
@@ -63,8 +56,7 @@ def update_sale_order(order_id):
     """编辑销售订单"""
     data = request.get_json(silent=True) or {}
     try:
-        order, warnings = SaleService.update_order(order_id, data)
-        result = order.to_dict()
+        result, warnings = SaleService.update_order(order_id, data)
         if warnings:
             result['warnings'] = warnings
         return success_response(result, '销售订单更新成功')
@@ -91,8 +83,8 @@ def ship_sale_order(order_id):
     """出库确认"""
     data = request.get_json(silent=True) or {}
     try:
-        order = SaleService.ship_order(order_id, data.get('ship_items'))
-        return success_response(order.to_dict(), '出库确认成功')
+        result = SaleService.ship_order(order_id, data.get('ship_items'))
+        return success_response(result, '出库确认成功')
     except ValueError as e:
         return error_response(str(e))
     except Exception as e:

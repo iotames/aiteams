@@ -35,8 +35,7 @@ def create_purchase_order():
     """创建采购订单"""
     data = request.get_json(silent=True) or {}
     try:
-        # create_order 返回 (order, []) 元组
-        order, _ = PurchaseService.create_order(data)
+        order = PurchaseService.create_order(data)
         return success_response(order.to_dict(), '采购订单创建成功')
     except ValueError as e:
         return error_response(str(e))
@@ -61,8 +60,7 @@ def update_purchase_order(order_id):
     """编辑采购订单"""
     data = request.get_json(silent=True) or {}
     try:
-        # update_order 返回 (order, []) 元组
-        order, _ = PurchaseService.update_order(order_id, data)
+        order = PurchaseService.update_order(order_id, data)
         return success_response(order.to_dict(), '采购订单更新成功')
     except ValueError as e:
         return error_response(str(e))

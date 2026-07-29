@@ -42,9 +42,11 @@ def main():
     webbrowser.open('http://127.0.0.1:5000')
 
     # 启动 (使用 backend/app.py)
-    os.chdir(os.path.join(script_dir, 'backend'))
+    backend_dir = os.path.join(script_dir, 'backend')
+    os.chdir(backend_dir)
+    sys.path.insert(0, backend_dir)
     from app import app
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)
 
 
 if __name__ == '__main__':

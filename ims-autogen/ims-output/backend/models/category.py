@@ -11,6 +11,7 @@ class Category(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     name = db.Column(db.String(50), nullable=False, unique=True, comment='分类名称')
     parent_id = db.Column(db.Integer, db.ForeignKey('category.id'), default=None, comment='父分类ID')
+    remark = db.Column(db.Text, default='', comment='备注')
     created_at = db.Column(db.DateTime, default=datetime.now, comment='创建时间')
 
     # 自关联关系
@@ -21,6 +22,7 @@ class Category(db.Model):
             'id': self.id,
             'name': self.name,
             'parent_id': self.parent_id,
+            'remark': self.remark or '',
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None
         }
 

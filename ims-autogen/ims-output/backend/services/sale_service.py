@@ -88,9 +88,8 @@ class SaleService:
             items.append(SaleOrderItem(
                 product_id=item_data['product_id'],
                 quantity=quantity,
-                shipped_quantity=0,
-                unit_price=unit_price,
-                subtotal=subtotal
+                price=unit_price,
+                amount=subtotal
             ))
 
         order = SaleOrder(
@@ -108,7 +107,7 @@ class SaleService:
         if stock_warnings:
             result['stock_warnings'] = stock_warnings
 
-        return result
+        return result, stock_warnings
 
     @staticmethod
     def update_order(order_id, data):
@@ -148,16 +147,15 @@ class SaleService:
                     order_id=order_id,
                     product_id=item_data['product_id'],
                     quantity=quantity,
-                    shipped_quantity=0,
-                    unit_price=unit_price,
-                    subtotal=subtotal
+                    price=unit_price,
+                    amount=subtotal
                 )
                 db.session.add(item)
 
             order.total_amount = total_amount
 
         db.session.commit()
-        return order.to_dict()
+        return order.to_dict(), []
 
     @staticmethod
     def delete_order(order_id):

@@ -1,0 +1,51 @@
+{
+  "skill_name": "chromedp",
+  "evals": [
+    {
+      "id": 1,
+      "name": "screenshot-local-webapp",
+      "prompt": "我本地启动了一个 Flask 服务在 http://127.0.0.1:5000，帮我打开浏览器截个图看看页面长什么样。",
+      "expected_output": "Launch Chrome → screenshot → get title/body text → report console errors → close Chrome.",
+      "steps": ["chromedp_launch", "screenshot", "evaluate(document.title)", "get_console_errors"],
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "debug-js-errors",
+      "prompt": "帮我检查一下 http://127.0.0.1:5000 这个页面有没有 JS 错误，把所有 console 报错列出来。",
+      "expected_output": "Navigate all main pages of the app, collect console errors/warnings from each, report them grouped by page.",
+      "steps": ["Launch", "get_console_errors per page", "report findings"],
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "extract-page-content",
+      "prompt": "用浏览器打开 http://127.0.0.1:5000，然后把页面里能看到的所有文字内容提取出来给我。",
+      "expected_output": "Full text of each page (dashboard, products, categories, etc.) extracted via query_selector or evaluate.",
+      "steps": ["navigate each route", "query_selector('#appContent')", "report text"],
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "check-api-network-errors",
+      "prompt": "帮我验证 http://127.0.0.1:5000 这个网页的所有 API 请求是否都正常返回了，有没有 404 或 500 的请求。",
+      "expected_output": "For each page, report get_network_errors() results. If no errors, confirm all APIs OK.",
+      "steps": ["per page: navigate → wait → get_network_errors"],
+      "files": []
+    },
+    {
+      "id": 5,
+      "name": "full-workflow-test",
+      "prompt": "帮我测试 http://127.0.0.1:5000 这个进销存系统的完整业务流程：创建分类/商品/供应商/客户，创建采购订单并入库，创建销售订单并出库，验证库存和报表。",
+      "expected_output": "Execute all CRUD operations via evaluate_async, verify each step succeeds, confirm final stock and report data are correct.",
+      "steps": [
+        "evaluate_async createCategory/createUnit/createProduct",
+        "evaluate_async createSupplier/createCustomer",
+        "evaluate_async createPurchaseOrder → receivePurchaseOrder",
+        "evaluate_async createSaleOrder → shipSaleOrder",
+        "verify getStock and getReportSummary"
+      ],
+      "files": []
+    }
+  ]
+}

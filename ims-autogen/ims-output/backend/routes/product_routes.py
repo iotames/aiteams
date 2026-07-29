@@ -28,10 +28,14 @@ def create_category():
     if not ok:
         return error_response(msg)
 
-    category = Category(name=data['name'], remark=data.get('remark', ''))
-    db.session.add(category)
-    db.session.commit()
-    return success_response(category.to_dict(), '分类创建成功')
+    try:
+        category = Category(name=data['name'], remark=data.get('remark', ''))
+        db.session.add(category)
+        db.session.commit()
+        return success_response(category.to_dict(), '分类创建成功')
+    except Exception as e:
+        db.session.rollback()
+        return error_response(f'分类创建失败: {str(e)}')
 
 
 @product_bp.route('/categories/<int:category_id>', methods=['PUT'])
@@ -46,8 +50,12 @@ def update_category(category_id):
         category.name = data['name']
     if 'remark' in data:
         category.remark = data['remark']
-    db.session.commit()
-    return success_response(category.to_dict(), '分类更新成功')
+    try:
+        db.session.commit()
+        return success_response(category.to_dict(), '分类更新成功')
+    except Exception as e:
+        db.session.rollback()
+        return error_response(f'分类更新失败: {str(e)}')
 
 
 @product_bp.route('/categories/<int:category_id>', methods=['DELETE'])
@@ -57,13 +65,16 @@ def delete_category(category_id):
     if not category:
         return error_response('分类不存在', 404)
 
-    # 检查是否有商品关联
     if Product.query.filter_by(category_id=category_id).first():
         return error_response('该分类下存在商品，无法删除')
 
-    db.session.delete(category)
-    db.session.commit()
-    return success_response(message='分类删除成功')
+    try:
+        db.session.delete(category)
+        db.session.commit()
+        return success_response(message='分类删除成功')
+    except Exception as e:
+        db.session.rollback()
+        return error_response(f'分类删除失败: {str(e)}')
 
 
 # ===== 单位 =====
@@ -83,10 +94,14 @@ def create_unit():
     if not ok:
         return error_response(msg)
 
-    unit = Unit(name=data['name'])
-    db.session.add(unit)
-    db.session.commit()
-    return success_response(unit.to_dict(), '单位创建成功')
+    try:
+        unit = Unit(name=data['name'])
+        db.session.add(unit)
+        db.session.commit()
+        return success_response(unit.to_dict(), '单位创建成功')
+    except Exception as e:
+        db.session.rollback()
+        return error_response(f'单位创建失败: {str(e)}')
 
 
 @product_bp.route('/units/<int:unit_id>', methods=['PUT'])
@@ -99,8 +114,12 @@ def update_unit(unit_id):
     data = request.get_json(silent=True) or {}
     if 'name' in data:
         unit.name = data['name']
-    db.session.commit()
-    return success_response(unit.to_dict(), '单位更新成功')
+    try:
+        db.session.commit()
+        return success_response(unit.to_dict(), '单位更新成功')
+    except Exception as e:
+        db.session.rollback()
+        return error_response(f'单位更新失败: {str(e)}')
 
 
 @product_bp.route('/units/<int:unit_id>', methods=['DELETE'])
@@ -113,9 +132,13 @@ def delete_unit(unit_id):
     if Product.query.filter_by(unit_id=unit_id).first():
         return error_response('该单位下存在商品，无法删除')
 
-    db.session.delete(unit)
-    db.session.commit()
-    return success_response(message='单位删除成功')
+    try:
+        db.session.delete(unit)
+        db.session.commit()
+        return success_response(message='单位删除成功')
+    except Exception as e:
+        db.session.rollback()
+        return error_response(f'单位删除失败: {str(e)}')
 
 
 # ===== 商品 =====
@@ -128,17 +151,11 @@ def list_products():
     keyword = request.args.get('keyword', '').strip()
     category_id = request.args.get('category_id', type=int)
 
-    products, total = ProductService.get_product_list(
+    result = ProductService.get_products(
         page=page, per_page=per_page,
-        keyword=keyword, category_id=category_id
+        search=keyword, category_id=category_id
     )
-    return success_response({
-        'items': [p.to_dict() for p in products],
-        'total': total,
-        'page': page,
-        'per_page': per_page,
-        'pages': (total + per_page - 1) // per_page if per_page > 0 else 0
-    })
+    return success_response(result)
 
 
 @product_bp.route('/products', methods=['POST'])
@@ -147,9 +164,13 @@ def create_product():
     data = request.get_json(silent=True) or {}
     try:
         product = ProductService.create_product(data)
-        return success_response(product.to_dict(), '商品创建成功')
+        return success_response(product, '商品创建成功')
     except ValueError as e:
+        db.session.rollback()
         return error_response(str(e))
+    except Exception as e:
+        db.session.rollback()
+        return error_response(f'商品创建失败: {str(e)}')
 
 
 @product_bp.route('/products/<int:product_id>', methods=['GET'])

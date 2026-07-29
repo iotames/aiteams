@@ -44,6 +44,7 @@
         },
 
         _match(pattern, hash) {
+            pattern = pattern.replace(/^\//, '');
             if (pattern === hash) return {};
             const pp = pattern.split('/'), hp = hash.split('/');
             if (pp.length !== hp.length) return null;
