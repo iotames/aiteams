@@ -28,7 +28,7 @@
 - 输入验证和错误处理
 
 **前端**（frontend/）：
-- 使用 HTML + CSS + JavaScript（或 Vue/React 简单版）
+- 使用 HTML + CSS + JavaScript
 - 响应式设计
 - 与后端 API 对接
 

@@ -12,6 +12,11 @@
     {ROLE}_API_KEY   > API_KEY   > 默认值 ""
     {ROLE}_API_BASE  > API_BASE  > 默认值 "https://api.deepseek.com/v1"
 
+非 OpenAI 模型的 model_info 自动推断：
+    模型名以 gpt-/o1/o3/o4 开头 → OpenAI 官方，无需 model_info
+    模型名以 deepseek 开头       → 自动设置 function_calling=True 等
+    其他未知模型                  → 安全默认值
+
 用法：
     from .config import get_config
 
@@ -30,6 +35,81 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
+# ── model_info 自动推断 ──────────────────────────────────
+
+# 不需要 model_info 的 OpenAI 官方模型前缀
+_OPENAI_PREFIXES = ("gpt-", "o1", "o3", "o4")
+
+# 已知非 OpenAI 模型的 model_info 预设
+_MODEL_INFO_PRESETS: dict[str, dict] = {
+    "deepseek": {
+        "vision": False,
+        "function_calling": True,
+        "json_output": False,
+        "family": "unknown",
+        "structured_output": True,
+    },
+    "claude": {
+        "vision": False,
+        "function_calling": True,
+        "json_output": False,
+        "family": "unknown",
+        "structured_output": True,
+    },
+    "qwen": {
+        "vision": False,
+        "function_calling": True,
+        "json_output": False,
+        "family": "unknown",
+        "structured_output": True,
+    },
+    "glm": {
+        "vision": False,
+        "function_calling": True,
+        "json_output": False,
+        "family": "unknown",
+        "structured_output": True,
+    },
+}
+
+# 未知模型的默认 model_info
+_UNKNOWN_MODEL_INFO: dict = {
+    "vision": False,
+    "function_calling": True,
+    "json_output": False,
+    "family": "unknown",
+    "structured_output": False,
+}
+
+
+def _resolve_model_info(model_name: str) -> dict | None:
+    """为给定模型名推断 model_info。
+
+    OpenAI 官方模型（gpt-*, o1, o3, o4）返回 None（不需要 model_info）。
+    已知非 OpenAI 模型返回预设值。
+    未知模型返回安全默认值。
+
+    AutoGen 要求非 OpenAI 模型必须提供 model_info，
+    否则抛出 ValueError: model_info is required...
+    """
+    name_lower = model_name.lower()
+
+    # OpenAI 官方模型 — 不需要 model_info
+    if any(name_lower.startswith(p) for p in _OPENAI_PREFIXES):
+        return None
+
+    # 已知模型预设
+    for prefix, info in _MODEL_INFO_PRESETS.items():
+        if name_lower.startswith(prefix):
+            return info
+
+    # 未知模型 — 安全默认值
+    return _UNKNOWN_MODEL_INFO
+
+
+# ── 配置数据类 ────────────────────────────────────────────
+
+
 @dataclass
 class ModelConfig:
     """单个模型的配置。"""
@@ -39,12 +119,19 @@ class ModelConfig:
     model_name: str = "deepseek-chat"
 
     def to_client_kwargs(self) -> dict:
-        """转为 OpenAIChatCompletionClient 构造参数。"""
-        return {
+        """转为 OpenAIChatCompletionClient 构造参数。
+
+        自动检测是否需要 model_info（非 OpenAI 模型必需）。
+        """
+        kwargs: dict = {
             "model": self.model_name,
             "api_key": self.api_key,
             "base_url": self.api_base,
         }
+        info = _resolve_model_info(self.model_name)
+        if info is not None:
+            kwargs["model_info"] = info
+        return kwargs
 
 
 @dataclass

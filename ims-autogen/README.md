@@ -34,6 +34,26 @@ cp .env.example .env
 # 编辑 .env，填入你的 API Key
 ```
 
+**最少配置**（两行即可运行）：
+
+```ini
+API_KEY=sk-your-api-key
+MODEL_NAME=deepseek-chat
+```
+
+> ⚠️ **重要**：`API_BASE` 必须以 `/v1` 结尾（OpenAI 兼容格式），默认已填好 DeepSeek 地址。
+
+**主流模型供应商速查：**
+
+| 供应商 | API_BASE | MODEL_NAME 示例 |
+|--------|----------|-----------------|
+| DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat` / `deepseek-v4-flash` |
+| OpenAI | `https://api.openai.com/v1` | `gpt-4o` / `gpt-4o-mini` |
+| 硅基流动 | `https://api.siliconflow.cn/v1` | `Qwen/Qwen3-235B-A22B` |
+| 本地 Ollama | `http://localhost:11434/v1` | `llama3:8b` |
+
+**非 OpenAI 模型自动适配**：`config.py` 会自动检测模型类型，为非 OpenAI 模型（DeepSeek、Claude、Qwen 等）注入必需的 `model_info`，你不需要手动配置任何额外参数。
+
 ### 3. 启动对话式开发
 
 ```bash
@@ -239,17 +259,36 @@ print(available("en"))   # ['architect', 'developer', ...]
 **优先级：** CLI 参数 > 环境变量 > `.env` 文件 > 代码默认值
 
 ```ini
-# 全局默认
+# 全局默认（所有角色共用）
 API_KEY=sk-xxx
 API_BASE=https://api.deepseek.com/v1
 MODEL_NAME=deepseek-chat
 
 # 分角色覆盖（可选，未设置回退到全局）
-PM_MODEL_NAME=gpt-4o
+PM_MODEL_NAME=deepseek-v4-pro        # 产品经理用更强的推理模型
 ARCHITECT_MODEL_NAME=deepseek-chat
-DEVELOPER_MODEL_NAME=claude-3-opus
+DEVELOPER_MODEL_NAME=deepseek-chat
 QA_MODEL_NAME=deepseek-chat
-SELECTOR_MODEL_NAME=gpt-4o-mini
+SELECTOR_MODEL_NAME=deepseek-chat    # 选择器建议用便宜快速的模型
 ```
 
 `config.py` 中 `AppConfig.role_model("PM")` 自动处理回退逻辑：先读 `PM_MODEL_NAME`，未配置则用 `MODEL_NAME`。
+
+---
+
+## 常见问题
+
+### 报错：`model_info is required when model name is not a valid OpenAI model`
+
+这是因为 AutoGen 要求非 OpenAI 模型必须提供 `model_info`（模型能力描述）。**本项目的 `config.py` 已自动处理**，只要你的 `MODEL_NAME` 在已知模型列表中（DeepSeek、Claude、Qwen、GLM 等）。
+
+如果你使用了全新的模型名，`config.py` 也会自动以安全默认值创建 `model_info`，通常不会报这个错。如果确实遇到了，请在 `.env` 中确认：
+
+1. `API_BASE` 是否以 `/v1` 结尾（如 `https://api.deepseek.com/v1`，而不是 `https://api.deepseek.com`）
+2. `MODEL_NAME` 是否拼写正确
+
+### 报错：连接超时或 404
+
+检查 `API_BASE` 是否可访问，尤其是：
+- DeepSeek 地址必须是 `https://api.deepseek.com/v1`（注意有子路径 `/v1`）
+- 如果用代理/VPN，确认 `API_BASE` 使用了正确的代理地址
