@@ -1,11 +1,11 @@
 ---
 name: chromedp
 description: >-
-  通过 Chrome DevTools Protocol (CDP) 控制系统已安装的 Chrome 浏览器进行 debug。
+  通过 Chrome DevTools Protocol (CDP) 控制系统已安装的 Chrome/Edge 浏览器进行 debug。
   用于截图、JS 错误诊断、DOM 状态检查、网络请求分析、表单交互。
-  当用户要求"截图看看"、"检查 JS 错误"、"提取页面文字"、"验证接口"、"用浏览器打开看看"时触发。
-  自动检测 Chrome 位置（APT / Snap / linglong / 标准路径），通过远程调试接口 WebSocket 连接。
-  仅依赖 websocket-client (~82KB)，不安装 Playwright/Puppeteer/Selenium。
+  当用户要求"截图看看"、"检查 JS 错误"、"提取页面文字"、"验证接口"、"用浏览器打开看看"、"打开浏览器看看"时触发。
+  也适用于填写表单、点击按钮、检查网络请求、提取页面信息等浏览器自动化操作。
+  自动检测系统已安装的 Chrome/Edge，通过远程调试接口 WebSocket 连接，极轻量无额外依赖。
 ---
 
 ## 设计原则
@@ -18,9 +18,9 @@ description: >-
 ## 环境要求
 
 - Python 3.7+
-- Chrome/Chromium 已安装（系统级或容器级如 snap/linglong）
+- Chrome/Chromium / Edge 已安装（Linux：系统级或 snap/linglong；Windows：标准安装路径）
 - `pip install websocket-client`
-- 有头模式需要 `DISPLAY` 环境变量（`DISPLAY=:0` 或 `WAYLAND_DISPLAY`）
+- 显示模式：Windows 桌面环境默认有头模式（用户可观察浏览器操作）；Linux 需 `DISPLAY` 环境变量（`DISPLAY=:0` 或 `WAYLAND_DISPLAY`）；传 `headless=True` 强制无头
 
 ## 使用方法
 
@@ -28,18 +28,13 @@ description: >-
 
 ```python
 from scripts.chromedp import chromedp_find_chrome
-prefix, binary_path = chromedp_find_chrome()
+prefix, binary_path = chromedp_find_chrome()          # 自动检测
+prefix, binary_path = chromedp_find_chrome(browser="chrome")  # 指定 Chrome
+prefix, binary_path = chromedp_find_chrome(browser="edge")    # 指定 Edge
 ```
 
-自动检测路径（按优先级）：
-- `/usr/bin/google-chrome`
-- `/usr/bin/chromium` / `chromium-browser`
-- `/snap/bin/chromium`
-- `/opt/google/chrome/google-chrome`
-- Linglong（`ll-cli run cn.google.chrome --`，自动检测层路径）
-
-对于 linglong 容器化 Chrome，自动使用 `ll-cli run cn.google.chrome --` 作为命令前缀，确保所有启动参数穿透容器。
-
+自动检测系统已安装的 Chrome/Edge（支持 Linux 和 Windows）。
+使用 `browser="chrome"` 或 `browser="edge"` 指定浏览器类型。
 如果找不到，**必须问用户**，不要直接放弃。
 
 ### 2. 启动 Chrome
@@ -53,10 +48,14 @@ proc = chromedp_launch(
     port=9222,
     timeout=5,
 )
+proc = chromedp_launch(browser="edge")  # 指定用 Edge
+proc = chromedp_launch(browser="chrome")  # 指定用 Chrome
 ```
 
-- 自动检测 `DISPLAY`/`WAYLAND_DISPLAY`，有显示器时有头，否则 `--headless=new`
-- 可 `headless=True` 强制无头
+- 桌面环境（Windows）默认有头模式，用户可观察浏览器操作
+- Linux 自动检测 `DISPLAY`/`WAYLAND_DISPLAY`，有显示器时有头
+- 传 `headless=True` 强制无头
+- 可传 `browser="chrome"` 或 `browser="edge"` 指定浏览器
 - 最大重试 3 次等待调试端口就绪
 
 ### 3. 连接 CDP 并调试
@@ -86,22 +85,6 @@ os.kill(proc.pid, signal.SIGTERM)
 ```
 
 无头模式下自动设置 viewport `1280x720`，确保 `getBoundingClientRect()` 返回正确尺寸。
-
-## 核心设计
-
-### 事件缓冲机制
-
-> chromedp 最关键的改进：**所有 CDP 事件永不丢失**。
-
-`_send()` 在等待命令响应时，会把收到的非响应消息（console 日志、网络事件等）自动缓冲到 `_event_buffer`。调用 `get_console_logs()` / `get_network_errors()` 时，先排干缓冲区再读新的。
-
-### CDP 命令自动重试
-
-`_send()` 在 WebSocket 断开时自动重连一次，重新发送命令。无需调用方处理重连逻辑。
-
-### 无头 Viewport 自动设置
-
-无头模式默认 viewport 为 0x0，`getBoundingClientRect()` 返回 0 尺寸，导致 `is_visible()` 误判。`CDPClient` 在连接时自动调用 `Emulation.setDeviceMetricsOverride` 设置 1280x720。
 
 ## 错误层级
 
@@ -285,23 +268,11 @@ results = client.query_selector("#dataBody")
 errors = client.get_console_errors(timeout=1)
 ```
 
-## 对比 Playwright
-
-| 维度 | chromedp (本技能) | Playwright |
-|---|---|---|
-| 安装体积 | ~82KB (`websocket-client`) | ~50MB+ (含 Chromium) |
-| 浏览器 | 复用系统 Chrome | 自带 Chromium 或系统 Chrome |
-| API 风格 | CDP 原生，手动控制 | 封装好的高级 API |
-| 适用场景 | 快速 debug、验证修复 | 自动化测试 CI、复杂流程 |
-| 学习成本 | 需了解 CDP 概念 | 开箱即用 |
-
-**结论**：调试阶段用 chromedp 快速验证，需要自动化回归测试再上 Playwright。
-
 ## 注意事项
 
 1. **Chrome 找不到时，先问用户** — 可能安装在自定义路径或容器中
 2. **不要启动 web 服务** — 只连接已有的页面
-3. **改代码后重启服务** — 用 `kill $(lsof -ti :5000)` 停服，`nohup python start.py &` 重启。若数据库有残留数据，先 `rm -f ims.db`
-4. **截图对我不可见** — 我是纯文本模型，只能通过 evaluate 提取 DOM 文本来"看"页面
-5. **`evaluate` 是核心工具** — 可以读 DOM、调 API、触发事件，比截图有用
-6. **杀 Chrome 用 `killall -9 chrome`** — `pkill -f "pattern"` 和 `ps | awk | xargs kill` 在有大量子进程（renderer/gpu/utility）时极慢（>10s），因为逐个匹配和发信号。`killall -9 chrome` 一次杀所有 `chrome` 命名进程，<1s。注意也会杀 VS Code 等嵌入 Chrome，在自动化测试环境无影响。
+3. **截图对我不可见** — 我是纯文本模型，只能通过 evaluate 提取 DOM 文本来"看"页面
+4. **`evaluate` 是核心工具** — 可以读 DOM、调 API、触发事件，比截图有用
+5. **杀 Chrome 用 `killall -9 chrome`** — `pkill -f "pattern"` 和 `ps | awk | xargs kill` 在有大量子进程（renderer/gpu/utility）时极慢（>10s），因为逐个匹配和发信号。`killall -9 chrome` 一次杀所有 `chrome` 命名进程，<1s。注意也会杀 VS Code 等嵌入 Chrome，在自动化测试环境无影响。
+6. **Windows 关闭浏览器用 `proc.terminate()`** — Windows 上 `os.kill(pid, signal.SIGTERM)` 可能无法正确终止进程树，优先使用 `proc.terminate()` 或 `taskkill /f /pid`。

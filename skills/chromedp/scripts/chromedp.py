@@ -45,41 +45,99 @@ class CDPJSError(CDPError):
 
 # ─── Chrome launcher ──────────────────────────────────────
 
-def chromedp_find_chrome():
-    """Locate the system Chrome binary.
+def chromedp_find_chrome(browser="auto"):
+    """Locate the system Chrome/Edge binary.
 
+    Args:
+        browser: ``"auto"`` (default, scan all), ``"chrome"`` (Chrome only),
+                 ``"edge"`` (Edge only).
+
+    Supports Linux (APT/Snap/Linglong) and Windows (Chrome/Edge standard paths).
+    Falls back to ``where`` command on Windows when standard paths fail.
     Returns (launch_command_prefix_list, binary_path) or raises FileNotFoundError.
     """
-    candidates = [
-        "/usr/bin/google-chrome",
-        "/usr/bin/chromium",
-        "/usr/bin/chromium-browser",
-        "/snap/bin/chromium",
-        "/opt/google/chrome/google-chrome",
-    ]
-    for path in candidates:
-        if os.path.exists(path):
-            return ([], path)
+    browser = browser.lower().strip()
+    if browser not in ("auto", "chrome", "edge"):
+        raise ValueError(f"browser must be 'auto', 'chrome', or 'edge', got {browser!r}")
 
-    import shutil
-    llcli = shutil.which("ll-cli")
-    if llcli:
-        layers_dir = "/var/lib/linglong/layers"
-        if os.path.isdir(layers_dir):
-            import glob as _glob
-            entries = sorted(_glob.glob(os.path.join(
-                layers_dir, "*", "files", "bin", "google", "chrome", "google-chrome"
-            )))
-            if entries:
-                return ([llcli, "run", "cn.google.chrome", "--"],
-                        "/opt/apps/cn.google.chrome/files/bin/google/chrome/google-chrome")
+    # ── Linux paths (Chrome/Chromium only) ──
+    if browser in ("auto", "chrome"):
+        linux_candidates = [
+            "/usr/bin/google-chrome",
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/snap/bin/chromium",
+            "/opt/google/chrome/google-chrome",
+        ]
+        for lp in linux_candidates:
+            if os.path.exists(lp):
+                return ([], lp)
+
+        # ── Linux linglong (Chrome only) ──
+        import shutil
+        llcli = shutil.which("ll-cli")
+        if llcli:
+            layers_dir = "/var/lib/linglong/layers"
+            if os.path.isdir(layers_dir):
+                import glob as _glob
+                entries = sorted(_glob.glob(os.path.join(
+                    layers_dir, "*", "files", "bin", "google", "chrome", "google-chrome"
+                )))
+                if entries:
+                    return ([llcli, "run", "cn.google.chrome", "--"],
+                            "/opt/apps/cn.google.chrome/files/bin/google/chrome/google-chrome")
+
+    # ── Windows paths ──
+    if os.name == "nt":
+        user_profile = os.environ.get("USERPROFILE", "")
+
+        chrome_candidates = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            os.path.join(user_profile, r"AppData\Local\Google\Chrome\Application\chrome.exe"),
+            os.path.join(user_profile, r"AppData\Local\MyChrome\Chrome\Application\chrome.exe"),
+        ]
+        edge_candidates = [
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            os.path.join(user_profile, r"AppData\Local\Microsoft\Edge\Application\msedge.exe"),
+        ]
+
+        win_candidates = []
+        if browser in ("auto", "chrome"):
+            win_candidates.extend(chrome_candidates)
+        if browser in ("auto", "edge"):
+            win_candidates.extend(edge_candidates)
+
+        for wp in win_candidates:
+            if os.path.exists(wp):
+                return ([], wp)
+
+        # ── Windows fallback: ``where`` command ──
+        where_names = []
+        if browser in ("auto", "chrome"):
+            where_names.extend(["chrome", "google-chrome"])
+        if browser in ("auto", "edge"):
+            where_names.append("msedge")
+
+        for name in where_names:
+            try:
+                result = subprocess.run(
+                    ["where", name],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode == 0:
+                    path = result.stdout.strip().split("\n")[0].strip()
+                    if path and os.path.exists(path):
+                        return ([], path)
+            except Exception:
+                continue
 
     raise FileNotFoundError(
-        "Chrome not found. Ask the user where Chrome is installed "
-        "(e.g. /usr/bin/google-chrome, snap, linglong, custom path)."
+        "Chrome/Edge not found. Ask the user where the browser is installed "
+        "(e.g. /usr/bin/google-chrome, snap, linglong, custom path on Linux; "
+        "Chrome or Edge standard install path on Windows)."
     )
-
-
 def chromedp_launch(
     url="http://127.0.0.1:5000",
     port=9222,
@@ -87,11 +145,22 @@ def chromedp_launch(
     extra_flags=None,
     timeout=5,
     headless=False,
+    browser="auto",
 ):
-    """Launch Chrome with remote debugging enabled.
+    """Launch Chrome/Edge with remote debugging enabled.
 
-    Auto-detects display environment: uses headed mode if DISPLAY is set,
-    headless mode otherwise. Pass headless=True to force headless.
+    Args:
+        url: Initial URL to navigate to.
+        port: Remote debugging port.
+        user_data_dir: Custom profile directory (auto tempdir if None).
+        extra_flags: Additional command-line flags.
+        timeout: Seconds to wait for debug port readiness per attempt.
+        headless: Force headless mode (auto-detects display otherwise).
+        browser: ``"auto"`` (default), ``"chrome"``, or ``"edge"``.
+
+    Auto-detects display environment: desktop OS (Windows) defaults to headed
+    mode; Linux checks DISPLAY/WAYLAND_DISPLAY environment variables.
+    Pass headless=True to force headless mode regardless.
 
     Retries connecting to the debug port up to 3 times if Chrome is slow to start.
     Returns the Popen handle. Caller should kill it when done.
@@ -99,10 +168,14 @@ def chromedp_launch(
     if user_data_dir is None:
         user_data_dir = tempfile.mkdtemp(prefix="chromedp-")
 
-    prefix, binary = chromedp_find_chrome()
+    prefix, binary = chromedp_find_chrome(browser=browser)
     cmd = [*prefix, binary]
 
-    has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    # Windows: desktop headed by default; Linux: check DISPLAY env
+    if os.name == "nt":
+        has_display = True
+    else:
+        has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
     use_headless = headless or not has_display
 
     flags = [
