@@ -21,7 +21,7 @@
 
 开发规范：
 1. 不使用 npm、构建工具或前端框架（零依赖）。标准原生：HTML + CSS + JavaScript，无需编译即可运行。支持 Web Components 标准。
-2. Bootstrap 5 和 Chart.js 必须下载到本地，不使用 CDN
+2. Bootstrap 5、Bootstrap Icons 和 Chart.js 通过 CDN 加载，不使用本地文件
 3. 统一导航栏和布局模板
 4. 封装 `api.js` 统一处理 API 调用、错误提示
 5. 每个页面实现完整 CRUD：列表、新增、编辑、删除

@@ -5,15 +5,27 @@
 通过 CrewAI 多 Agent 协作自动生成完整的进销存系统代码。
 所有 Agent/Task 提示词从 prompts/ 目录加载，实现代码与提示词完全解耦。
 
-Usage:
-    uv run ims-crew            # 完整团队模式
-    uv run ims-crew --profile backend-only  # 仅后端模式
-    uv run ims-train           # 训练模式
+用法:
+    uv run ims-crew                          # 全流程 6 角色
+    uv run ims-crew --from backend           # 从后端开发开始(断点续跑)
+    uv run ims-crew --only pm,arch,backend,qa  # 只跑指定角色
+    uv run ims-train                         # 训练模式
 """
 
+import logging
+import os
 import sys
 import argparse
 from pathlib import Path
+
+# ── 日志配置 ──────────────────────────────────────────────
+LOG_LEVEL = os.environ.get("CREW_LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("ims-crew")
 
 # ── 确保输出目录存在 ──────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -24,54 +36,143 @@ for d in [OUTPUT_DIR, PROJECT_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 
+ROLE_SHORT_NAMES = ["pm", "arch", "backend", "frontend", "qa", "devops"]
+
+
+def _check_env() -> None:
+    """检查运行环境：.env 文件和必要的 API Key。"""
+    env_file = BASE_DIR / ".env"
+    if not env_file.exists():
+        logger.warning(
+            ".env 文件不存在，请从 .env.example 复制并配置 API Key:\n"
+            "  cp .env.example .env\n"
+            "  然后编辑 .env 填入 LLM API Key"
+        )
+
+    # 检查是否有任何 LLM API Key 配置
+    key_envs = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"]
+    has_key = any(os.environ.get(k) or (env_file.exists() and k in env_file.read_text(encoding="utf-8")) for k in key_envs)
+    if not has_key:
+        logger.warning(
+            "未检测到任何 LLM API Key。请配置至少一个:\n"
+            "  OPENAI_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY / OPENROUTER_API_KEY"
+        )
+
+
+def _parse_role_list(value: str) -> list[str]:
+    """解析逗号分隔的角色短名列表，返回完整角色名。"""
+    from .crew import ROLE_ALIASES
+
+    raw = [s.strip() for s in value.split(",")]
+    for s in raw:
+        if s not in ROLE_ALIASES:
+            print(f"  ❌ 未知角色: {s}，可选: {', '.join(ROLE_ALIASES.keys())}")
+            sys.exit(1)
+    return [ROLE_ALIASES[s] for s in raw]
+
+
 def run():
     """执行 Crew，生成进销存系统"""
+    _check_env()
+
     parser = argparse.ArgumentParser(description="进销存管理系统生成器")
     parser.add_argument(
-        "--profile",
-        type=str,
-        default="full",
-        choices=["full", "backend-only", "prototype"],
-        help="团队 Profile（默认 full: 所有角色完整流水线）",
+        "--from", dest="resume_from",
+        type=str, default="",
+        choices=ROLE_SHORT_NAMES + [""],
+        help="从指定角色开始（跳过前面的角色）: pm / arch / backend / frontend / qa / devops",
     )
     parser.add_argument(
-        "--no-fix",
+        "--only",
+        type=str, default="",
+        help="只运行指定角色(逗号分隔): pm,arch,backend,qa",
+    )
+    parser.add_argument(
+        "--skip-post-fix",
         action="store_true",
-        help="跳过生成后自动修复",
+        help="跳过生成后自动修复（原名 --no-fix，仍兼容）",
+    )
+    parser.add_argument(
+        "--no-fix",  # 兼容旧参数名
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--qa-rounds",
+        type=int,
+        default=5,
+        help="QA 反馈闭环轮数（默认 5，最大 20，设为 0 跳过闭环）",
     )
     args = parser.parse_args()
 
-    from .crew import IMSCrew
+    # ── 参数验证 ──
+    if args.qa_rounds < 0:
+        print("  ❌ --qa-rounds 不能为负数")
+        sys.exit(1)
+    if args.qa_rounds > 20:
+        print("  ⚠️  --qa-rounds 最大值为 20，已自动限制为 20")
+        args.qa_rounds = 20
 
+    from .crew import IMSCrew, ROLE_ALIASES, ROLE_ORDER, ROLE_DISPLAY
+
+    # 解析参数
+    only_roles = _parse_role_list(args.only) if args.only else None
+    resume_from = ROLE_ALIASES.get(args.resume_from) if args.resume_from else None
+
+    # 兼容 --no-fix（旧参数名）
+    skip_post_fix = args.skip_post_fix or args.no_fix
+
+    # 打印流水线概要
     print("=" * 60)
     print("  进销存管理系统生成器 — CrewAI 软件开发团队")
     print("=" * 60)
     print()
-    print(f"  团队 Profile: {args.profile}")
-    if args.profile == "full":
-        print("  ├─ 产品经理    — 需求分析")
-        print("  ├─ 系统架构师  — 系统设计")
-        print("  ├─ 后端工程师  — API 开发")
-        print("  ├─ 前端工程师  — 管理后台")
-        print("  ├─ QA 工程师   — 测试验证")
-        print("  └─ DevOps      — 部署配置")
+
+    if resume_from:
+        idx = ROLE_ORDER.index(resume_from)
+        print(f"  断点续跑: 从 {ROLE_DISPLAY[resume_from]} 开始")
+        print(f"  ── 跳过: {' → '.join(ROLE_DISPLAY[r] for r in ROLE_ORDER[:idx])}")
+        print(f"  ── 执行: {' → '.join(ROLE_DISPLAY[r] for r in ROLE_ORDER[idx:])}")
+    elif only_roles:
+        print(f"  仅运行: {' → '.join(ROLE_DISPLAY[r] for r in only_roles)}")
+    else:
+        print("  全流程 6 角色:")
+        print("  ├─ 产品经理    → 需求分析    (output/PRD.md)")
+        print("  ├─ 系统架构师  → 系统设计    (output/ARCHITECTURE.md + openapi.yaml)")
+        print("  ├─ 后端工程师  → API 开发    (project/backend/)")
+        print("  ├─ 前端工程师  → 管理后台    (project/frontend/)")
+        print("  ├─ QA 工程师   → 测试验证    (project/tests/ + QA_REPORT.md)")
+        print("  └─ DevOps      → 部署配置    (project/Dockerfile + docker-compose)")
+    if args.qa_rounds > 0 and (resume_from or not only_roles or "qa" in (args.only or "").split(",")):
+        print(f"  QA 反馈闭环: {args.qa_rounds} 轮 修复→测试循环")
+    else:
+        print("  QA 反馈闭环: 关闭")
+    if skip_post_fix:
+        print("  生成后自动修复: 跳过")
+    else:
+        print("  生成后自动修复: 启用")
     print()
     print("  预计运行时间: 5-15 分钟（取决于 LLM 响应速度）")
     print()
 
     # 执行 Crew
-    crew_instance = IMSCrew().crew_with_profile(args.profile)
-    result = crew_instance.kickoff()
+    crew_instance = IMSCrew()
+    assembled = crew_instance.crew_with_options(
+        resume_from=resume_from,
+        only_roles=only_roles,
+        qa_rounds=args.qa_rounds,
+    )
+    result = assembled.kickoff()
 
     print()
     print("=" * 60)
     print("  ✅ 生成完成!")
-    print(f"  输出目录: {PROJECT_DIR}")
     print(f"  文档目录: {OUTPUT_DIR}")
+    print(f"  代码目录: {PROJECT_DIR}")
     print("=" * 60)
 
     # 执行生成后修复（默认启用）
-    if not args.no_fix:
+    if not skip_post_fix:
         print("\n🛠️  执行生成后自动修复...")
         from .fixers.post_gen_fixes import run_all_fixes
         fix_results = run_all_fixes(PROJECT_DIR)
@@ -90,6 +191,7 @@ def run():
     print("  uvicorn backend.main:app --reload --port 8000")
     print()
 
+    logger.info("生成完成，结果见 %s 和 %s", OUTPUT_DIR, PROJECT_DIR)
     return result
 
 
@@ -102,7 +204,8 @@ def train():
                         help="训练迭代次数（默认 5）")
     parser.add_argument("filename", nargs="?", type=str, default="training_data.pkl",
                         help="训练数据保存文件（默认 training_data.pkl）")
-    args = parser.parse_args(sys.argv[2:])  # 跳过 "train" 子命令
+    # 使用 parse_known_args 避免与父命令的 argparse 冲突
+    args, _ = parser.parse_known_args()
 
     print(f"🧠 开始训练 (迭代次数: {args.n_iterations})...")
     IMSCrew().crew().train(

@@ -2,7 +2,7 @@
 
 ## Description
 
-基于后端代码（`{backend_code_summary}`）和前端页面（`{frontend_code_summary}`），为系统编写完整的测试用例并执行质量审查。
+基于后端代码和前端页面（见架构设计产出和 project/ 目录），为系统编写完整的测试用例并执行质量审查。
 
 ### 需要创建的文件
 
@@ -54,3 +54,10 @@ project/tests/
 
 - `project/tests/` 目录下的 pytest 测试文件
 - `output/QA_REPORT.md` 质量审查报告
+
+## 自检要求（输出前请确认）
+
+1. 测试文件是否覆盖所有 API 端点的正常和异常路径
+2. 每个测试用例是否相互独立、可重复运行
+3. QA 报告中的 BUG 是否标注了位置和严重级别
+4. 测试数据库是否使用内存 SQLite

@@ -158,8 +158,6 @@ requires-python = ">=3.11"
 dependencies = [
     "crewai>=0.100.0",
     "crewai-tools>=0.0.10",
-    "pyyaml>=6.0",
-    "httpx>=0.27.0",
 ]
 
 [project.scripts]
@@ -217,18 +215,23 @@ OPENAI_API_KEY=your_openai_api_key_here
 # Task: 后端 API 开发
 
 ## Description
-基于架构设计文档（`{architecture_content}`）和数据库模型...
+基于架构设计文档和数据库模型（见前序产出），实现完整的后端 API 代码...
 ### 需要创建的文件结构
 ...
 
 ## Expected Output
 完整的后端 FastAPI 项目...
+
+## 自检要求（输出前请确认）
+1. 所有文件是否已创建并写入完整内容
+...
 ```
 
 ### 4.4 设计原则
 
 - **每个角色/任务一个独立文件** — 方便单独修改和复用
-- **支持模板变量** — 如 `{prd_content}`、`{architecture_content}` 在运行时由 CrewAI 替换
+- **文件注入取代模板变量** — 前序任务产出文件通过代码自动读取并注入到 Task description（取代旧的 `{variable}` 模板变量机制）
+- **每个 Task 含自检清单** — 输出前 LLM 自行验证文件完整性、语法正确性
 - **纯文本无代码** — `.md` 文件中不含 Python 代码，非技术人员可直接编辑
 - **目录即索引** — `prompts/agents/` 目录下的文件列表就是可用的 Agent 列表
 
@@ -264,29 +267,50 @@ task_config = load_task("backend_development")
 ### 6.1 Agent 工厂函数
 
 ```python
-def _make_agent(name: str, allow_delegation: bool = False, llm: str | None = None) -> Agent:
+def _make_agent(
+    name: str, allow_delegation: bool = False,
+    llm: str | None = None, tools: list | None = None,
+) -> Agent:
     prompt = load_agent(name)
+    role = prompt.get("role", name)
+    goal = prompt.get("goal", "")
+    backstory = prompt.get("backstory", "")
     return Agent(
-        role=prompt["role"],
-        goal=prompt["goal"],
-        backstory=prompt["backstory"],
+        role=role, goal=goal, backstory=backstory,
         allow_delegation=allow_delegation,
-        verbose=True,
-        llm=llm,  # 不同角色可指定不同模型
+        verbose=True, llm=llm,
+        tools=tools or [],  # 绑定质量检查/测试工具
     )
 ```
+
+不同角色绑定不同的工具：
+- **后端工程师**：`CheckPythonSyntaxTool`, `CodeQualityCheckAllTool`, `ValidateAPIRoutesTool`
+- **QA 工程师**：`RunPytestTool`, `CheckPythonSyntaxTool`, `CodeQualityCheckAllTool`
 
 ### 6.2 Task 工厂函数
 
 ```python
-def _make_task(name, agent, context_tasks=None, output_file=None):
+def _make_task(name, agent, context_tasks=None, output_file=None,
+               human_input=False, description_append=None, inject_file_inputs=True):
     prompt = load_task(name)
+    description = prompt.get("description", "")
+
+    # 自动注入前序文件产出（替代 {variable} 模板变量）
+    if inject_file_inputs:
+        file_content = _load_task_file_inputs(name)
+        if file_content:
+            description += f"\n\n## 前序产出\n\n{file_content}"
+
+    if description_append:
+        description += f"\n\n{description_append}"
+
     return Task(
-        description=prompt["description"],
-        expected_output=prompt["expected_output"],
+        description=description,
+        expected_output=prompt.get("expected_output", ""),
         agent=agent,
-        context=context_tasks,  # 依赖链
+        context=context_tasks,
         output_file=output_file,
+        human_input=human_input,  # PRD 阶段启用人工审批
     )
 ```
 
@@ -323,14 +347,15 @@ agents = [
 ### 7.1 CLI 入口（main.py）
 
 ```python
-# 支持 --profile 和 --no-fix 参数
+# 支持 --from / --only / --skip-post-fix / --qa-rounds 等参数
 def run():
+    _check_env()  # 自动检查 .env 和 API Key
     parser = argparse.ArgumentParser()
-    parser.add_argument("--profile", default="full")
-    parser.add_argument("--no-fix", action="store_true")
+    parser.add_argument("--from", dest="resume_from", ...)
+    parser.add_argument("--only", ...)
+    parser.add_argument("--skip-post-fix", action="store_true")
+    parser.add_argument("--qa-rounds", type=int, default=5)
     ...
-    crew = IMSCrew().crew_with_profile(args.profile)
-    result = crew.kickoff()
 ```
 
 ### 7.2 运行命令
@@ -344,55 +369,70 @@ cd ims-crew
 uv run ims-crew
 
 # 仅后端模式（减少 Token 消耗）
-uv run ims-crew --profile backend-only
+uv run ims-crew --only pm,arch,backend,qa
 
 # 快速原型（跳过 QA 和 DevOps）
-uv run ims-crew --profile prototype
+uv run ims-crew --only arch,backend,frontend
 
 # 跳过自动修复
-uv run ims-crew --no-fix
+uv run ims-crew --skip-post-fix
+# （旧参数 --no-fix 仍兼容）
+
+# QA 反馈闭环轮数控制
+uv run ims-crew --qa-rounds 3   # 3 轮修复-测试
+uv run ims-crew --qa-rounds 0   # 跳过闭环
+
+# 断点续跑
+uv run ims-crew --from backend
 
 # 训练模式（优化 Agent 表现）
 uv run ims-train 5
+
+# 环境变量控制
+export CREW_LOG_LEVEL=DEBUG           # 调试日志
+export CREW_MAX_EXECUTION_TIME=7200   # 任务超时
 ```
 
 ---
 
-## 8. 团队 Profile 配置
+## 8. 角色裁剪与断点续跑
 
-### 8.1 profiles.yaml
+`--profile` 已被更灵活的 `--only`（精确角色选择）和 `--from`（断点续跑）取代。
 
-```yaml
-profiles:
-  full:
-    description: "完整软件开发团队 — 6 角色全流程"
-    agents: [pm, architect, backend, frontend, qa, devops]
-    tasks: [requirement, design, backend, frontend, test, deploy]
+### 8.1 角色裁剪（--only）
 
-  backend-only:
-    description: "仅后端开发 — 4 角色"
-    agents: [pm, architect, backend, qa]
-    tasks: [requirement, design, backend, test]
+```bash
+# 等价于原 full profile
+uv run ims-crew
 
-  prototype:
-    description: "快速原型 — 3 角色"
-    agents: [architect, backend, frontend]
-    tasks: [design, backend, frontend]
+# 等价于原 backend-only profile
+uv run ims-crew --only pm,arch,backend,qa
+
+# 等价于原 prototype profile
+uv run ims-crew --only arch,backend,frontend
+
+# 任意自定义组合
+uv run ims-crew --only backend,frontend,devops
 ```
 
-### 8.2 内置 Profile
+### 8.2 断点续跑（--from）
 
-| Profile | 角色数 | 应用场景 |
-|---------|--------|---------|
-| `full` | 6 | 完整软件交付流水线 |
-| `backend-only` | 4 | 只需后端 API 代码 |
-| `prototype` | 3 | 快速生成可运行原型 |
+```bash
+# 从架构师开始（跳过 PM，自动注入已有的 PRD）
+uv run ims-crew --from arch
+
+# 从 QA 开始（跳过开发阶段，直接测试已有代码）
+uv run ims-crew --from qa
+
+# 与 --only 组合
+uv run ims-crew --from arch --only arch,backend,frontend
+```
 
 ---
 
 ## 9. 后处理与自修复管线
 
-生成完成后自动执行 4 项修复（可通过 `--no-fix` 跳过）：
+生成完成后自动执行 4 项修复（可通过 `--skip-post-fix` 或旧名 `--no-fix` 跳过）：
 
 | 修复项 | 解决的问题 |
 |--------|-----------|
@@ -508,14 +548,12 @@ class IMSFlow(Flow):
 
 ### 11.2 Human-in-the-Loop
 
+系统已在 PRD 阶段默认启用人工确认（`human_input=True`）。在需求分析完成后，会暂停等待用户审查和编辑 PRD 后再继续后续流程：
+
 ```python
-def _make_task(name, agent, context_tasks=None, output_file=None, human_input=False):
-    return Task(
-        description=prompt["description"],
-        expected_output=prompt["expected_output"],
-        agent=agent,
-        human_input=human_input,  # 要求人工确认后再继续
-    )
+# PRD 阶段自动启用人工确认
+human = task_name == "requirement_analysis"
+t = _make_task(task_name, agent, ..., human_input=human)
 ```
 
 ### 11.3 复用提示词到其他项目

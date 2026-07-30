@@ -2,7 +2,9 @@
 
 ## Description
 
-基于架构设计文档（`{architecture_content}`），实现完整的管理后台前端页面。
+基于架构设计文档（见前序产出）和 OpenAPI 规范（`output/openapi.yaml`），实现完整的管理后台前端页面。
+
+所有 API 请求的 URL、请求体、响应解析必须严格遵循 `output/openapi.yaml` 中定义的接口规范。
 
 ### 技术限制
 - 纯 HTML/CSS/JavaScript（不使用 React/Vue 等框架）
@@ -84,3 +86,11 @@ project/frontend/
 
 完整的后台管理前端项目，所有文件保存在 `project/frontend/` 目录下。
 用浏览器直接打开 `frontend/index.html` 即可使用（需要后端同时运行）。
+
+## 自检要求（输出前请确认）
+
+1. 所有 HTML 文件是否已创建并包含完整内容
+2. 每个页面是否有对应的导航入口
+3. API 调用是否与 `output/openapi.yaml` 的接口路径一致
+4. 表单提交是否有前端验证
+5. 删除操作是否有二次确认弹窗

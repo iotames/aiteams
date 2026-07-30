@@ -2,7 +2,9 @@
 
 ## Description
 
-基于架构设计文档（`{architecture_content}`）和数据库模型（`{models_content}`），实现完整的后端 API 代码。
+基于架构设计文档和数据库模型（见前序产出），以及 OpenAPI 规范（`output/openapi.yaml`），实现完整的后端 API 代码。
+
+API 接口必须严格遵循 `output/openapi.yaml` 中定义的路径、方法、请求体、响应体结构，不能擅自修改字段名或响应格式。
 
 ### 需要创建的文件结构
 
@@ -69,3 +71,11 @@ project/backend/
 
 完整的后端 FastAPI 项目，所有文件保存在 `project/backend/` 目录下。
 代码应该可以直接通过 `uvicorn backend.main:app` 运行。
+
+## 自检要求（输出前请确认）
+
+1. 所有文件是否已创建并写入完整内容
+2. 每个 API 端点是否有输入校验和错误处理（422/404）
+3. 数据库模型是否与架构设计中的 ER 图一致
+4. 路由是否严格遵循 `output/openapi.yaml` 的接口定义
+5. 是否有语法错误（如未闭合的括号、缺失的 import）

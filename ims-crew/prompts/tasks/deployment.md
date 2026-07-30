@@ -50,3 +50,10 @@ project/
 
 部署配置文件和项目文档，保存在 `project/` 目录下。
 确保通过 `docker-compose up` 可以一键启动完整系统。
+
+## 自检要求（输出前请确认）
+
+1. Dockerfile 是否可构建
+2. docker-compose.yml 是否包含所有必要的服务定义
+3. README 是否包含环境要求、快速启动步骤和 API 索引
+4. 配置文件是否与代码中的环境变量命名一致

@@ -12,6 +12,7 @@
 - 列表项和代码块原样保留
 """
 
+from functools import lru_cache
 from pathlib import Path
 
 # 项目根目录
@@ -71,6 +72,7 @@ def _clean_content(lines: list[str]) -> str:
     return "\n".join(lines)
 
 
+@lru_cache(maxsize=32)
 def load_agent(name: str) -> dict[str, str]:
     """加载一个 Agent 的提示词。
 
@@ -84,6 +86,7 @@ def load_agent(name: str) -> dict[str, str]:
     return load_prompt(path)
 
 
+@lru_cache(maxsize=32)
 def load_task(name: str) -> dict[str, str]:
     """加载一个 Task 的提示词。
 
