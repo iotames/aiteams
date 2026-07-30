@@ -89,6 +89,11 @@ def list_available(lang: str = "zh") -> list[str]:
         if f.name == "README.md":
             continue
         files.append(f.stem)
+    # 包含 agents/ 子目录的角色定义文件
+    agents_dir = _PROMPTS_DIR / "agents"
+    if agents_dir.exists():
+        for f in agents_dir.glob(pattern):
+            files.append(f"agents/{f.stem}")
     if lang != "zh":
         lang_dir = _PROMPTS_DIR / lang
         if lang_dir.exists():

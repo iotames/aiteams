@@ -3,7 +3,8 @@
 
 由 IMSProductManager 使用，根据任务规划和用户需求输出 PRD。
 支持 scope 参数控制 MVP / Full 范围。
-提示词从 prompts/prd.md 动态加载。
+角色定义从 prompts/agents/product-manager.md 动态加载。
+任务提示词从 prompts/prd.md 动态加载。
 """
 
 from metagpt.actions import Action
@@ -28,7 +29,8 @@ class WritePRD(Action):
         Returns:
             完整的 PRD Markdown 文档。
         """
-        prompt_template = load_prompt("prd")
-        prompt = prompt_template.format(task_plan=task_plan, requirement=requirement, scope=scope)
+        role = load_prompt("agents/product-manager")
+        task = load_prompt("prd")
+        prompt = f"{role}\n\n{task}".format(task_plan=task_plan, requirement=requirement, scope=scope)
         rsp = await self._aask(prompt)
         return rsp

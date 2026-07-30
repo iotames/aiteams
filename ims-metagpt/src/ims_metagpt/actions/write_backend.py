@@ -2,7 +2,8 @@
 写后端代码 Action
 
 由 IMSEngineer 使用，根据架构设计生成 FastAPI 后端代码。
-提示词从 prompts/backend-code.md 动态加载。
+角色定义从 prompts/agents/backend-developer.md 动态加载。
+任务提示词从 prompts/backend-code.md 动态加载。
 """
 
 from metagpt.actions import Action
@@ -25,7 +26,8 @@ class WriteBackend(Action):
         Returns:
             生成的后端代码文件列表（含路径和内容）。
         """
-        prompt_template = load_prompt("backend-code")
-        prompt = prompt_template.format(design=design)
+        role = load_prompt("agents/backend-developer")
+        task = load_prompt("backend-code")
+        prompt = f"{role}\n\n{task}".format(design=design)
         rsp = await self._aask(prompt)
         return rsp

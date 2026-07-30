@@ -2,7 +2,8 @@
 写前端代码 Action
 
 由 IMSEngineer 使用，根据架构设计生成前端管理页面。
-提示词从 prompts/frontend-code.md 动态加载。
+角色定义从 prompts/agents/frontend-developer.md 动态加载。
+任务提示词从 prompts/frontend-code.md 动态加载。
 """
 
 from metagpt.actions import Action
@@ -25,7 +26,8 @@ class WriteFrontend(Action):
         Returns:
             生成的前端代码文件列表（含路径和内容）。
         """
-        prompt_template = load_prompt("frontend-code")
-        prompt = prompt_template.format(design=design)
+        role = load_prompt("agents/frontend-developer")
+        task = load_prompt("frontend-code")
+        prompt = f"{role}\n\n{task}".format(design=design)
         rsp = await self._aask(prompt)
         return rsp

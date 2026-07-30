@@ -3,7 +3,8 @@
 
 用于 iterate（迭代）和 refactor（重构）模式。
 基于已有代码，生成 git diff 格式的增量变更计划。
-提示词从 prompts/change-plan.md 动态加载。
+角色定义从 prompts/agents/fullstack-engineer.md 动态加载。
+任务提示词从 prompts/change-plan.md 动态加载。
 """
 
 from metagpt.actions import Action
@@ -28,8 +29,9 @@ class WriteChangePlan(Action):
         Returns:
             增量变更计划（含变更分析和 git diff 格式的变更内容）。
         """
-        prompt_template = load_prompt("change-plan")
-        prompt = prompt_template.format(
+        role = load_prompt("agents/fullstack-engineer")
+        task = load_prompt("change-plan")
+        prompt = f"{role}\n\n{task}".format(
             scope_type=scope_type,
             idea=idea,
             existing_code=existing_code if existing_code else "(新项目，无现有代码)",

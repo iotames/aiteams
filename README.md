@@ -10,7 +10,7 @@
 | [ims-metagpt](./ims-metagpt/) | MetaGPT | 进销存管理系统（完整生命周期） | 分步接力：plan → design → code → iterate → refactor |
 | [ims-crew](./ims-crew/) | CrewAI | 进销存管理系统（串行流水线） | 角色流水线、快速原型 |
 | [oh-my-openagent](./oh-my-openagent/) | — | Agent 角色 Prompt 参考库 | 11 个预定义角色的原始/翻译 system prompt |
-| [skills](./skills/) | Reasonix 技能 | Chrome DevTools / 技能创建 | 全局可复用的工具扩展包 |
+| [skills](./skills/) | — | 给AI智能体使用的技能包 | 项目复用的自动化工具包 |
 
 ## 设计原则
 
@@ -69,4 +69,4 @@ ims-crew --profile backend-only
 ## 其他目录
 
 - **[oh-my-openagent](./oh-my-openagent/)** — 提取自上游开源项目的 Agent 角色 System Prompt 参考库，包含 11 个预定义角色的原始英文版和中文翻译版，可作为自定义 Agent 提示词的参考起点。
-- **[skills/](./skills/)** — Reasonix 工具框架的技能扩展包，包含 Chrome DevTools Protocol 自动化（chromedp）和技能创建与评测框架（skill-creator），可在本仓库的 AI 协作开发中复用。
+- **[skills/](./skills/)** — 技能扩展包，包含 Chrome DevTools Protocol 自动化（chromedp）和技能创建与评测框架（skill-creator），可在本仓库的 AI 协作开发中复用。
