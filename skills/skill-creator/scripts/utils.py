@@ -2,6 +2,7 @@
 
 import inspect
 import io
+import os
 import sys
 from pathlib import Path
 
@@ -19,6 +20,18 @@ def ensure_utf8_stdio() -> None:
             stream.reconfigure(encoding="utf-8")
         except (AttributeError, ValueError, io.UnsupportedOperation):
             pass
+
+
+def can_open_browser() -> bool:
+    """判断当前环境是否可能打开图形浏览器。
+
+    macOS 与 Windows 视为有图形环境；Linux 依赖 DISPLAY 或 WAYLAND_DISPLAY，
+    无显示环境（服务器、CI、容器）返回 False。仅供参考——实际打开失败不会
+    影响功能，但默认在无头环境下自动跳过 webbrowser.open。
+    """
+    if sys.platform == "darwin" or sys.platform == "win32":
+        return True
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
 
 def filter_kwargs(cls: type, kwargs: dict) -> dict:
@@ -87,8 +100,9 @@ def parse_skill_md(skill_path: Path) -> tuple[str, str, str]:
 
     使用 PyYAML 解析 frontmatter（与 quick_validate 一致），确保块标量
     （>、| 等）、带引号字符串、折叠语义在整个工具链中行为一致。
+    utf-8-sig 读取会去除开头 BOM，与 quick_validate 保持一致。
     """
-    content = (skill_path / "SKILL.md").read_text(encoding="utf-8")
+    content = (skill_path / "SKILL.md").read_text(encoding="utf-8-sig")
     lines = content.split("\n")
 
     if not lines or lines[0].strip() != "---":

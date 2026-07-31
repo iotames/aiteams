@@ -12,6 +12,7 @@
 
 import argparse
 import json
+import shutil
 import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -194,6 +195,10 @@ def main():
             print(f"  [{status}] rate={rate_str}{err} 期望触发={r['should_trigger']}：{r['query'][:70]}", file=sys.stderr)
 
     print(json.dumps(output, indent=2))
+
+    # 清理一次性临时项目根（--project-root 显式指定时由调用方管理）
+    if not args.project_root:
+        shutil.rmtree(project_root, ignore_errors=True)
 
 
 if __name__ == "__main__":

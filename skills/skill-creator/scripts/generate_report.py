@@ -15,6 +15,32 @@ from pathlib import Path
 from scripts.utils import ensure_utf8_stdio
 
 
+def aggregate_runs(results: list[dict]) -> tuple[int, int]:
+    """计算所有重试次数的合计正确/总数。"""
+    correct = 0
+    total = 0
+    for r in results:
+        runs = r.get("runs", 0)
+        triggers = r.get("triggers", 0)
+        total += runs
+        if r.get("should_trigger", True):
+            correct += triggers
+        else:
+            correct += runs - triggers
+    return correct, total
+
+
+def score_class(correct: int, total: int) -> str:
+    """根据正确率返回 CSS 类名（good / ok / bad）。"""
+    if total > 0:
+        ratio = correct / total
+        if ratio >= 0.8:
+            return "score-good"
+        elif ratio >= 0.5:
+            return "score-ok"
+    return "score-bad"
+
+
 def generate_html(data: dict, auto_refresh: bool = False, skill_name: str = "") -> str:
     """根据循环输出数据生成 HTML 报告。auto_refresh 为 True 时添加 meta refresh 标签。"""
     history = data.get("history", [])
@@ -225,32 +251,8 @@ def generate_html(data: dict, auto_refresh: bool = False, skill_name: str = "") 
         train_by_query = {r["query"]: r for r in train_results}
         test_by_query = {r["query"]: r for r in test_results} if test_results else {}
 
-        # 计算所有重试次数的合计正确/总数
-        def aggregate_runs(results: list[dict]) -> tuple[int, int]:
-            correct = 0
-            total = 0
-            for r in results:
-                runs = r.get("runs", 0)
-                triggers = r.get("triggers", 0)
-                total += runs
-                if r.get("should_trigger", True):
-                    correct += triggers
-                else:
-                    correct += runs - triggers
-            return correct, total
-
         train_correct, train_runs = aggregate_runs(train_results)
         test_correct, test_runs = aggregate_runs(test_results)
-
-        # 确定分数样式
-        def score_class(correct: int, total: int) -> str:
-            if total > 0:
-                ratio = correct / total
-                if ratio >= 0.8:
-                    return "score-good"
-                elif ratio >= 0.5:
-                    return "score-ok"
-            return "score-bad"
 
         train_class = score_class(train_correct, train_runs)
         test_class = score_class(test_correct, test_runs)

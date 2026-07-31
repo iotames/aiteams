@@ -8,6 +8,7 @@
 import argparse
 import json
 import random
+import shutil
 import sys
 import tempfile
 import time
@@ -20,7 +21,12 @@ from scripts.llm import get_llm_client, detect_available_llms
 from scripts.runners import get_runner, detect_available_runners
 from scripts.runners.base import SkillContext
 from scripts.run_eval import run_eval, _make_project_root
-from scripts.utils import ensure_utf8_stdio, parse_skill_md, prompt_choose_backend
+from scripts.utils import (
+    can_open_browser,
+    ensure_utf8_stdio,
+    parse_skill_md,
+    prompt_choose_backend,
+)
 
 
 def split_eval_set(eval_set: list[dict], holdout: float, seed: int = 42) -> tuple[list[dict], list[dict]]:
@@ -240,7 +246,7 @@ def run_loop(
         print(f"\n退出原因：{exit_reason}", file=sys.stderr)
         print(f"最佳分数：{best_score}（第 {best['iteration']} 轮）", file=sys.stderr)
 
-    return {
+    output = {
         "exit_reason": exit_reason,
         "original_description": original_description,
         "best_description": best["description"],
@@ -254,6 +260,12 @@ def run_loop(
         "test_size": len(test_set),
         "history": history,
     }
+
+    # 清理一次性临时项目根（--project-root 显式指定时由调用方管理）
+    if project_root_arg is None:
+        shutil.rmtree(project_root, ignore_errors=True)
+
+    return output
 
 
 def main():
@@ -275,6 +287,7 @@ def main():
     parser.add_argument("--openai-api-key", default=None, help="openai runner/LLM 客户端的 API key（默认：$OPENAI_API_KEY）")
     parser.add_argument("--project-root", default=None, help="runner 注入技能文件用的项目根（默认：一次性临时目录）")
     parser.add_argument("--verbose", action="store_true", help="向 stderr 打印进度")
+    parser.add_argument("--no-browser", action="store_true", help="不自动打开 HTML 报告（无头环境默认自动禁用）")
     parser.add_argument("--report", default="auto", help="在此路径生成 HTML 报告（默认 'auto' 为临时文件，'none' 禁用）")
     parser.add_argument("--results-dir", default=None, help="把全部输出（results.json、report.html、log.txt）保存到此处的时间戳子目录")
     args = parser.parse_args()
@@ -295,9 +308,14 @@ def main():
             live_report_path = Path(tempfile.gettempdir()) / f"skill_description_report_{skill_path.name}_{timestamp}.html"
         else:
             live_report_path = Path(args.report)
-        # 立即打开报告，让用户可以实时观看
+        # 立即打开报告，让用户可以实时观看（无头环境自动跳过）
         live_report_path.write_text("<html><body><h1>正在启动优化循环...</h1><meta http-equiv='refresh' content='5'></body></html>", encoding="utf-8")
-        webbrowser.open(str(live_report_path))
+        if args.no_browser:
+            print(f"已禁用自动打开浏览器。报告路径：{live_report_path}", file=sys.stderr)
+        elif can_open_browser():
+            webbrowser.open(str(live_report_path))
+        else:
+            print(f"无图形环境，跳过自动打开浏览器。报告路径：{live_report_path}", file=sys.stderr)
     else:
         live_report_path = None
 

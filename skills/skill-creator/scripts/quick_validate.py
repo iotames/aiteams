@@ -210,8 +210,7 @@ def validate_skill(skill_path):
 if __name__ == "__main__":
     # 内联副本，使脚本直接运行时也能工作
     # `python scripts/quick_validate.py <skill_directory>`（无需包上下文）。
-    import sys as _sys
-    for _stream in (_sys.stdout, _sys.stderr):
+    for _stream in (sys.stdout, sys.stderr):
         try:
             _stream.reconfigure(encoding="utf-8")
         except (AttributeError, ValueError):

@@ -170,7 +170,7 @@ def embed_file(path: Path) -> dict:
         try:
             content = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
-            content = "（读取文件出错）"
+            return {"name": path.name, "type": "error", "content": "（读取文件出错）"}
         return {
             "name": path.name,
             "type": "text",
