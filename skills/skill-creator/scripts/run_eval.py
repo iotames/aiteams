@@ -39,7 +39,7 @@ def run_eval(
 
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
         future_to_info = {}
-        for item in eval_set:
+        for item_idx, item in enumerate(eval_set):
             for run_idx in range(runs_per_query):
                 future = executor.submit(
                     runner.run_query,
@@ -49,34 +49,32 @@ def run_eval(
                     timeout,
                     str(project_root) if project_root else None,
                 )
-                future_to_info[future] = (item, run_idx)
+                # 用 eval 条目索引做 key：评测集中两条不同条目可能使用相同
+                # query，按 query 字符串聚合会导致互相覆盖、统计错误。
+                future_to_info[future] = (item_idx, run_idx)
 
-        query_triggers: dict[str, list[bool]] = {}
-        query_items: dict[str, dict] = {}
-        query_errors: dict[str, list[str]] = {}
+        # 按 eval 条目索引聚合触发/错误（而不是按 query 字符串）
+        item_triggers: dict[int, list[bool]] = {i: [] for i in range(len(eval_set))}
+        item_errors: dict[int, list[str]] = {i: [] for i in range(len(eval_set))}
         for future in as_completed(future_to_info):
-            item, _ = future_to_info[future]
-            query = item["query"]
-            query_items[query] = item
-            if query not in query_triggers:
-                query_triggers[query] = []
-                query_errors[query] = []
+            item_idx, _ = future_to_info[future]
             try:
                 result = future.result()
-                query_triggers[query].append(result.triggered)
+                item_triggers[item_idx].append(result.triggered)
                 if result.error:
-                    query_errors[query].append(result.error)
+                    item_errors[item_idx].append(result.error)
                     print(
-                        f"警告：query 失败（{result.error}）：{query[:60]}",
+                        f"警告：query 失败（{result.error}）：{eval_set[item_idx]['query'][:60]}",
                         file=sys.stderr,
                     )
             except Exception as e:
                 print(f"警告：query 失败：{e}", file=sys.stderr)
-                query_triggers[query].append(False)
-                query_errors[query].append(str(e))
+                item_triggers[item_idx].append(False)
+                item_errors[item_idx].append(str(e))
 
-    for query, triggers in query_triggers.items():
-        item = query_items[query]
+    # 按 eval_set 原始顺序输出（与输入一致，便于 run_loop 按位置切分 train/test）
+    for item_idx, item in enumerate(eval_set):
+        triggers = item_triggers[item_idx]
         trigger_rate = sum(triggers) / len(triggers)
         should_trigger = item["should_trigger"]
         if should_trigger:
@@ -84,13 +82,13 @@ def run_eval(
         else:
             did_pass = trigger_rate < trigger_threshold
         results.append({
-            "query": query,
+            "query": item["query"],
             "should_trigger": should_trigger,
             "trigger_rate": trigger_rate,
             "triggers": sum(triggers),
             "runs": len(triggers),
-            "errors": len(query_errors[query]),
-            "error_details": query_errors[query][:3],
+            "errors": len(item_errors[item_idx]),
+            "error_details": item_errors[item_idx][:3],
             "pass": did_pass,
         })
 

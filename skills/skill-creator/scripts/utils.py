@@ -95,18 +95,20 @@ def prompt_choose_backend(kind: str, candidates: dict[str, str], flag: str,
     return choice
 
 
-def parse_skill_md(skill_path: Path) -> tuple[str, str, str]:
-    """解析 SKILL.md 文件，返回 (name, description, full_content)。
+def extract_frontmatter(content: str) -> tuple[dict | None, str, str]:
+    """从 SKILL.md 内容中提取 YAML frontmatter。
 
-    使用 PyYAML 解析 frontmatter（与 quick_validate 一致），确保块标量
-    （>、| 等）、带引号字符串、折叠语义在整个工具链中行为一致。
-    utf-8-sig 读取会去除开头 BOM，与 quick_validate 保持一致。
+    返回 (frontmatter, frontmatter_text, body)：
+    - 找不到 frontmatter（没有开头的 ---）或未闭合时，frontmatter 为 None、
+      frontmatter_text 为空串、body 为原始内容。
+    - YAML 无效时抛 ValueError。
+    - 与 quick_validate 共用同一套解析逻辑，避免行为漂移
+      （frontmatter 必须从第一行开始、容忍 CRLF、BOM 由 utf-8-sig 去除）。
     """
-    content = (skill_path / "SKILL.md").read_text(encoding="utf-8-sig")
     lines = content.split("\n")
 
     if not lines or lines[0].strip() != "---":
-        raise ValueError("SKILL.md 缺少 frontmatter（没有开头的 ---）")
+        return None, "", content
 
     end_idx = None
     for i, line in enumerate(lines[1:], start=1):
@@ -115,13 +117,30 @@ def parse_skill_md(skill_path: Path) -> tuple[str, str, str]:
             break
 
     if end_idx is None:
-        raise ValueError("SKILL.md 缺少 frontmatter（没有结尾的 ---）")
+        return None, "", content
 
     frontmatter_text = "\n".join(lines[1:end_idx])
+    body = "\n".join(lines[end_idx + 1:])
     try:
         frontmatter = yaml.safe_load(frontmatter_text)
     except yaml.YAMLError as e:
         raise ValueError(f"frontmatter 中的 YAML 无效：{e}") from e
+
+    return frontmatter, frontmatter_text, body
+
+
+def parse_skill_md(skill_path: Path) -> tuple[str, str, str]:
+    """解析 SKILL.md 文件，返回 (name, description, full_content)。
+
+    使用 PyYAML 解析 frontmatter（与 quick_validate 一致），确保块标量
+    （>、| 等）、带引号字符串、折叠语义在整个工具链中行为一致。
+    utf-8-sig 读取会去除开头 BOM，与 quick_validate 保持一致。
+    """
+    content = (skill_path / "SKILL.md").read_text(encoding="utf-8-sig")
+
+    frontmatter, _, _ = extract_frontmatter(content)
+    if frontmatter is None:
+        raise ValueError("SKILL.md 缺少 frontmatter（没有开头的 ---）")
     if not isinstance(frontmatter, dict):
         raise ValueError("SKILL.md frontmatter 必须是 YAML 字典")
 

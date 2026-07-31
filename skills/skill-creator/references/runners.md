@@ -29,7 +29,7 @@ Runner 只是**评测试金石**：评测"描述触发准确率"需要一个真�
 ## 选择 runner
 
 ```bash
-# 自动检测（本机有 claude CLI 则用 claude-code，否则用 openai）
+# 未传 --runner 时交互式询问用户选择后端（绝不自动决定）
 python -m scripts.run_eval --eval-set evals.json --skill-path <skill>
 
 # 显式指定 OpenAI 兼容端点

@@ -336,6 +336,50 @@ class RunLoopTest(unittest.TestCase):
         self.assertIn("技能描述优化", content)
         self.assertIn("auto", content)
 
+    def test_duplicate_query_position_split(self):
+        """重复 query 的两条 eval 条目必须按位置切分 train/test。
+
+        回归测试：run_loop 曾按 query 字符串在 all_results 中过滤拆
+        train/test，重复 query 会导致条目丢失或错配。现在 run_eval 按
+        eval_set 顺序输出、run_loop 按位置切分，重复 query 也必须各归其位。
+        """
+        skill = make_skill(self.root)
+        # 两条相同 query、should_trigger 相反的条目，都进入 train（holdout=0）
+        dup_eval = [
+            {"query": "处理pdf文件", "should_trigger": True},
+            {"query": "处理pdf文件", "should_trigger": False},
+        ]
+        fake = self.fake_run_eval
+        fake.side_effect = self._fake_run_eval(
+            {"处理pdf文件": 0.0}
+        )
+        llm = FakeLLM(["<new_description>x</new_description>"])
+        out = run_loop(
+            eval_set=dup_eval,
+            skill_path=skill,
+            description_override="初始描述",
+            num_workers=2,
+            timeout=10,
+            max_iterations=1,
+            runs_per_query=1,
+            trigger_threshold=0.5,
+            holdout=0.0,
+            model="test-model",
+            verbose=False,
+            llm_client=llm,
+            runner=FakeRunner(keywords=[]),
+        )
+        # 两条条目都保留在 train 结果中（rate 0.0：应触发者失败、不应触发者通过），
+        # 未被去重或错配
+        self.assertEqual(out["train_size"], 2)
+        self.assertEqual(len(out["history"][0]["train_results"]), 2)
+        self.assertEqual(out["best_train_score"], "1/2")
+        # 两条结果确实对应两条 eval 条目
+        self.assertEqual(
+            [r["should_trigger"] for r in out["history"][0]["train_results"]],
+            [True, False],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,7 +7,7 @@ description: >-
   也适用于用户询问"怎么写 SKILL.md"、"技能应该包含什么内容"。
 license: Apache-2.0
 metadata:
-  version: "2.1.0"
+  version: "2.2.0"
 allowed-tools: Read Write Edit Bash Glob Grep Task Fleet ReadFile ReadSkill RunSkill WebFetch Research Review
 ---
 

@@ -194,6 +194,52 @@ class RunEvalTest(unittest.TestCase):
         # pdf -> pass, xlsx -> fail, 邮件 -> pass, 天气 -> pass
         self.assertEqual(out["summary"], {"total": 4, "passed": 3, "failed": 1})
 
+    def test_duplicate_query_not_merged(self):
+        """相同 query 出现在不同 eval 条目时，必须按条目独立统计。
+
+        回归测试：曾经以 query 字符串为聚合 key，导致重复 query 被合并、
+        后一条覆盖前一条。
+        """
+        runner = FakeRunner(keywords=["pdf"])
+        # 第一条应触发（会命中），第二条不应触发（会误触发 → 失败）
+        dup = [
+            {"query": "处理pdf文件", "should_trigger": True},
+            {"query": "处理pdf文件", "should_trigger": False},
+        ]
+        out = run_eval(
+            eval_set=dup,
+            skill_ctx=SkillContext(skill_name="demo", description="pdf"),
+            runner=runner,
+            num_workers=2,
+            timeout=10,
+            runs_per_query=1,
+            trigger_threshold=0.5,
+            model=None,
+        )
+        # 两条独立结果，按 eval_set 顺序输出
+        self.assertEqual(len(out["results"]), 2)
+        self.assertTrue(out["results"][0]["pass"])
+        self.assertFalse(out["results"][1]["pass"])
+        self.assertEqual(out["summary"], {"total": 2, "passed": 1, "failed": 1})
+
+    def test_results_in_eval_set_order(self):
+        """结果必须按 eval_set 原始顺序输出，便于 run_loop 按位置切分 train/test。"""
+        runner = FakeRunner(keywords=["pdf"])
+        out = run_eval(
+            eval_set=EVAL,
+            skill_ctx=SkillContext(skill_name="demo", description="pdf"),
+            runner=runner,
+            num_workers=2,
+            timeout=10,
+            runs_per_query=1,
+            trigger_threshold=0.5,
+            model=None,
+        )
+        self.assertEqual(
+            [r["query"] for r in out["results"]],
+            [item["query"] for item in EVAL],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

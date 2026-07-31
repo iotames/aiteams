@@ -4,11 +4,16 @@
 """
 
 import sys
-import os
 import re
 import json
-import yaml
 from pathlib import Path
+
+# 复用 utils 的 frontmatter 解析（避免行为漂移）；独立运行（python scripts/quick_validate.py）
+# 时 scripts 包不可用，回退到同目录的 utils 模块。
+try:
+    from scripts.utils import ensure_utf8_stdio, extract_frontmatter
+except ImportError:
+    from utils import ensure_utf8_stdio, extract_frontmatter
 
 EVALS_SCHEMA_FIELDS = ('id', 'prompt', 'expected_output', 'files', 'expectations')
 
@@ -79,22 +84,15 @@ def validate_skill(skill_path):
     if not content.startswith('---'):
         return False, "未找到 YAML frontmatter"
 
-    # 提取 frontmatter（容忍 CRLF 换行）
-    match = re.match(r'^---[\r\n]+(.*?)[\r\n]+---', content, re.DOTALL)
-    if not match:
-        return False, "frontmatter 格式无效"
+    # 解析 frontmatter（与 utils.parse_skill_md 共用同一套逻辑）
+    try:
+        frontmatter, frontmatter_text, _ = extract_frontmatter(content)
+    except ValueError as e:
+        return False, str(e)
+    if frontmatter is None or not isinstance(frontmatter, dict):
+        return False, "frontmatter 必须是 YAML 字典"
 
     warnings: list[str] = []
-
-    frontmatter_text = match.group(1)
-
-    # 解析 YAML frontmatter
-    try:
-        frontmatter = yaml.safe_load(frontmatter_text)
-        if not isinstance(frontmatter, dict):
-            return False, "frontmatter 必须是 YAML 字典"
-    except yaml.YAMLError as e:
-        return False, f"frontmatter 中的 YAML 无效：{e}"
 
     # 定义允许的属性
     ALLOWED_PROPERTIES = {'name', 'description', 'license', 'allowed-tools', 'metadata', 'compatibility'}
@@ -208,13 +206,8 @@ def validate_skill(skill_path):
     return True, message
 
 if __name__ == "__main__":
-    # 内联副本，使脚本直接运行时也能工作
     # `python scripts/quick_validate.py <skill_directory>`（无需包上下文）。
-    for _stream in (sys.stdout, sys.stderr):
-        try:
-            _stream.reconfigure(encoding="utf-8")
-        except (AttributeError, ValueError):
-            pass
+    ensure_utf8_stdio()
     if len(sys.argv) != 2:
         print("用法：python -m scripts.quick_validate <skill_directory>")
         sys.exit(1)

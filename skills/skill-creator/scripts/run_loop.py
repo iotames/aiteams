@@ -117,10 +117,10 @@ def run_loop(
         )
         eval_elapsed = time.time() - t0
 
-        # 按 query 把结果拆回 train/test
-        train_queries_set = {q["query"] for q in train_set}
-        train_result_list = [r for r in all_results["results"] if r["query"] in train_queries_set]
-        test_result_list = [r for r in all_results["results"] if r["query"] not in train_queries_set]
+        # 按位置切分 train/test —— run_eval 按 eval_set 顺序输出结果
+        # （train 在前，test 在后），不依赖 query 字符串匹配。
+        train_result_list = all_results["results"][:len(train_set)]
+        test_result_list = all_results["results"][len(train_set):]
 
         train_passed = sum(1 for r in train_result_list if r["pass"])
         train_total = len(train_result_list)
