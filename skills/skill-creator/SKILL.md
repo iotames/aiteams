@@ -7,13 +7,17 @@ description: >-
   也适用于用户询问"怎么写 SKILL.md"、"技能应该包含什么内容"。
 license: Apache-2.0
 metadata:
-  version: "2.0.0"
+  version: "2.1.0"
 allowed-tools: Read Write Edit Bash Glob Grep Task Fleet ReadFile ReadSkill RunSkill WebFetch Research Review
 ---
 
 # Skill Creator — 技能创建与优化
 
-用于创建新技能并迭代优化已有技能。支持从需求调研、起草、测试、评估到打包的全流程。
+用于创建新技能并迭代优化已有技能。支持从需求调研、起草、测试、评估到交付的全流程。
+
+> **高频路径 vs 低频参考**：本文件只包含核心流程。描述优化、打包分发、查看器界面细节、
+> 盲比等**低频场景**已下沉到 `references/`，按需加载（见文末「参考文件」）。
+> 创建简单零依赖技能且无需分发时，只需本文件的「创建技能」章节，其余都用不上。
 
 ---
 
@@ -32,7 +36,7 @@ SKILL.md 是写给 AI 模型看的**使用说明书**，不是技术实现文档
 
 **关键原则：** 告诉模型「怎么用」，或者「调用的示例代码」，而不是告诉模型「技能代码和原理」。
 
-> 依赖声明约定：新技能的依赖**不强制** requirements.txt —— 依赖什么语言就声明什么，写在 frontmatter 的 `compatibility` 字段（≤500 字符，如 `Requires Python 3.14+ and uv`）或 SKILL.md 正文「环境要求」节。requirements.txt 仅用于本技能（skill-creator）自身工具链的运行时依赖（见 `requirements.txt`）。
+> 依赖声明约定：新技能的依赖**不强制** requirements.txt —— 依赖什么语言就声明什么，写在 frontmatter 的 `compatibility` 字段（≤500 字符，如 `Requires Python 3.14+ and uv`）或 SKILL.md 正文「环境要求」节。requirements.txt 仅用于本技能（skill-creator）自身工具链的运行时依赖。
 
 ---
 
@@ -44,7 +48,7 @@ SKILL.md 是写给 AI 模型看的**使用说明书**，不是技术实现文档
 4. **运行评测** — 同时跑带技能/不带技能的对比测试
 5. **评估结果** — 查看输出、分析定量指标、收集反馈
 6. **迭代优化** — 根据反馈修改技能，重复 3-6
-7. **打包发布** — 优化描述后打包为 `.skill` 文件
+7. **交付** — 目录即技能，直接可用；需要单文件分发才打包（见 references/packaging.md）
 
 ---
 
@@ -73,6 +77,7 @@ SKILL.md 是写给 AI 模型看的**使用说明书**，不是技术实现文档
 - **description**：触发机制的核心。写清楚技能做什么以及具体的触发场景，最长 1024 字符。当前 AI 模型有"触发不足"的倾向——需要时却不使用技能。为此让描述稍微"强势"一点。例如不要写"如何构建简单仪表盘"，而是写"当用户提到仪表盘、数据可视化、内部指标时务必使用此技能，即使没有明确说'dashboard'一词"
 - **allowed-tools**（可选）：空格分隔的预授权工具字符串，如 `allowed-tools: Read Write Bash(git:*)`。规范要求是字符串而非 YAML 列表
 - **license**（可选）：开源许可证名或指向打包 LICENSE 文件的引用
+- **compatibility**（可选）：环境要求，最长 500 字符（如 `Requires Python 3.14+ and uv`）
 - 正文：按上述内容原则组织
 
 **起草完成后，必须运行验证**：
@@ -99,7 +104,7 @@ skill-name/
 
 技能使用三层加载机制：
 1. **元数据**（name + description）— 始终在上下文中
-2. **SKILL.md 正文** — 触发时加载（建议 <500 行）
+2. **SKILL.md 正文** — 触发时加载（建议 <500 行 / <5000 tokens）
 3. **附带资源** — 按需加载（无限制）
 
 正文接近 500 行时，拆分到 `references/` 并添加目录索引。大文件（>300 行）也要提供目录索引。多领域技能按变体组织：
@@ -193,7 +198,7 @@ cloud-deploy/
 
 好断言**客观可验证**且有**描述性名称**。主观类技能（写作风格、设计）适合定性评估，不强行写断言。
 
-更新 `eval_metadata.json` 和 `evals/evals.json`。告知用户 viewer 中会看到什么。
+更新 `eval_metadata.json` 和 `evals/evals.json`。告知用户查看器中会看到什么（详见 `references/viewer.md`）。
 
 ### 第 3 步：测试完成时保存计时数据
 
@@ -219,7 +224,7 @@ cloud-deploy/
    ```
    生成 `benchmark.json` 和 `benchmark.md`，包含通过率、耗时、token 的均值±标准差和差值。每个 with_skill 版本放在 baseline 之前。
 
-3. **分析** — 阅读 benchmark 数据，找出汇总统计可能隐藏的模式：总是通过的断言（无区分度）、高方差评测（可能不稳定）、时间/token 权衡。
+3. **分析** — 阅读 benchmark 数据，找出汇总统计可能隐藏的模式：总是通过的断言（无区分度）、高方差评测（可能不稳定）、时间/token 权衡。详见 `references/advanced.md`。
 
 4. **启动查看器**：
    ```bash
@@ -228,23 +233,9 @@ cloud-deploy/
      --skill-name "my-skill" \
      --benchmark <workspace>/iteration-N/benchmark.json
    ```
-   迭代 2+ 时加 `--previous-workspace`。无图形界面用 `--static <output_path>` 生成静态 HTML 文件。
+   迭代 2+ 时加 `--previous-workspace`。无图形界面用 `--static <output_path>` 生成静态 HTML 文件。界面各标签页的详细说明见 `references/viewer.md`。
 
 5. **告知用户**："结果已打开。'Outputs' 标签页查看输出并留反馈，'Benchmark' 展示定量对比。"
-
-#### 查看器说明
-
-**Outputs 标签页：**
-- **Prompt**：给定任务
-- **Output**：技能输出（尽可能内联渲染）
-- **Previous Output**（迭代 2+）：上轮输出的折叠区域
-- **Formal Grades**（有评分时）：断言通过/失败的折叠区域
-- **Feedback**：自动保存的文本框
-- **Previous Feedback**（迭代 2+）：用户上次评论
-
-**Benchmark 标签页：** 通过率、耗时、token 按配置汇总，含每个 eval 的详细分析。
-
-通过方向键或按钮翻页。点击 "Submit All Reviews" 保存反馈到 `feedback.json`。
 
 ### 第 5 步：阅读反馈
 
@@ -258,21 +249,13 @@ cloud-deploy/
 }
 ```
 
-空反馈表示没问题，专注于有具体意见的测试用例改进。完成后关闭查看器（Ctrl+C 或关闭终端）。
+空反馈表示没问题，专注于有具体意见的测试用例改进。完成后关闭查看器（服务器模式 Ctrl+C）。
 
 ---
 
 ## 三、优化技能
 
-### 改进思路
-
-1. **从反馈中泛化**。技能要能用于大量不同场景，而非仅适配几个测试用例。与其做琐碎的过拟合修改或严苛的"必须"，不如尝试不同思路或工作模式。
-
-2. **保持精简**。去掉不发挥作用的内容。阅读完整执行记录——如果技能让模型浪费时间做低效的事，去掉导致这些行为的指令。
-
-3. **解释原因**。解释每项指令背后的**为什么**。如果发现自己用全大写的 ALWAYS/NEVER 或极端僵化的结构，这是警告信号——重新组织语言，让模型理解要求的重要性。
-
-4. **识别重复工作**。阅读测试记录，观察子任务是否都写了相似的辅助脚本。如果多个测试都写了 `create_docx.py` 或 `build_chart.py`，技能应该内置该脚本，放在 `scripts/` 中。
+这是整个循环的核心：基于反馈让技能更好。
 
 ### 迭代循环
 
@@ -284,126 +267,46 @@ cloud-deploy/
 
 持续直到用户满意、反馈全空、或无实质进展。
 
-### 进阶：盲比
+### 改进思路
 
-需要更严格的版本对比时，可用盲比系统（详见 `agents/comparator.md` 和 `agents/analyzer.md`）。给独立 agent 两个输出，不告知版本信息，让其评判质量。
+1. **从反馈中泛化**。技能要能用于大量不同场景，而非仅适配几个测试用例。与其做琐碎的过拟合修改或严苛的"必须"，不如尝试不同思路或工作模式。
+2. **保持精简**。去掉不发挥作用的内容。阅读完整执行记录——如果技能让模型浪费时间做低效的事，去掉导致这些行为的指令。
+3. **解释原因**。解释每项指令背后的**为什么**。如果发现自己用全大写的 ALWAYS/NEVER 或极端僵化的结构，这是警告信号——重新组织语言，让模型理解要求的重要性。
+4. **识别重复工作**。阅读测试记录，观察子任务是否都写了相似的辅助脚本。如果多个测试都写了 `create_docx.py` 或 `build_chart.py`，技能应该内置该脚本，放在 `scripts/` 中。
 
-可选功能，需要子任务支持。
+### 严格对比（可选）
 
----
-
-## 四、描述优化
-
-description 字段是触发机制的核心。技能内容完善后，可优化描述提高触发准确率。
-
-> **评测与技能的边界（核心原则）**：**技能本体（SKILL.md + scripts）保持模型无关、纯通用格式**——它是写给任何智能体的 Markdown 指令 + 纯代码，不包含"如果模型是 X 就怎样"的逻辑，不主动适配大模型个性化。`--runner` 只是**评测试金石**：评测"触发率"需要一个真实智能体来执行查询并决定是否激活技能，runner 选的正是这个试金石，与技能本体无关。若未来新智能体有专属注入机制，适配写进新 runner，技能文件一行不改。
->
-> **后端选择：询问用户，绝不自动决定**。检测只负责**列出候选**（本机是否有 `claude` CLI、是否设置 `OPENAI_API_KEY`），具体用哪个**必须由你确认**：CLI 会交互提示候选并让你输入，直接回车使用推荐项。注意"检测到 claude CLI"只代表 PATH 中存在该命令，**不代表可用**——一切以你的确认为准。非交互环境（无 stdin）会报错，要求显式传 `--runner` / `--llm`，不会自作主张。
-
-### 第 1 步：生成触发评测查询
-
-创建 20 条混合应触发/不应触发的查询：
-
-```json
-[
-  {"query": "用户 prompt", "should_trigger": true},
-  {"query": "另一个 prompt", "should_trigger": false}
-]
-```
-
-查询必须**真实**——包含文件路径、用户背景、列名、公司名、URL 等细节。混合不同长度、大小写、口语化表达。关注边界情况。
-
-不好的例子：`"格式化数据"`、`"从 PDF 提取文本"`
-好的例子：`"老板发了个 xlsx 文件想加一列利润率百分比"`
-
-**应触发**（8-10 条）：覆盖不同表述方式——正式的、随意的，包含不直接提技能名但明显需要的场景。
-**不应触发**（8-10 条）：最有价值的是"接近但不同"的场景——共享关键词但实际需求不同。
-
-### 第 2 步：用户确认
-
-使用 `assets/eval_review.html` 模板展示给用户确认。替换 `__EVAL_DATA_PLACEHOLDER__`、`__SKILL_NAME_PLACEHOLDER__`、`__SKILL_DESCRIPTION_PLACEHOLDER__`。用户可编辑查询、切换应触发/不应触发、增删条目，然后导出。
-
-### 第 3 步：运行优化循环
-
-```bash
-python -m scripts.run_loop \
-  --eval-set <path-to-trigger-eval.json> \
-  --skill-path <path-to-skill> \
-  --model <当前模型 ID> \
-  --max-iterations 5 \
-  --verbose
-```
-
-将评测集分为 60% 训练 / 40% 测试，评估当前描述（每条 3 次取可靠触发率），基于失败案例提出改进，在训练和测试集上重新评估，最多 5 轮。用测试分数选择最佳描述以避免过拟合。
-
-### 第 4 步：应用结果
-
-取 `best_description` 更新 frontmatter，展示前后对比和分数。
+需要更严格的版本对比（如"新版本真的更好吗？"）时，可用盲比系统——给独立 agent 两个输出，不告知版本信息，让其评判质量。详见 `references/advanced.md`。可选功能，需要子任务支持。
 
 ---
 
-## 五、打包
+## 低频场景指引
 
-```bash
-python -m scripts.package_skill <path/to/skill-folder> --output <output-dir>
-```
+以下场景按需读取对应参考文件，**不要主动加载**：
 
-打包前 `package_skill` 会自动运行 `quick_validate`，验证失败则中止打包。
-
-如环境可用，建议用官方参考实现做最终校验（比自研验证器更严格、跟随规范演进）：
-
-```bash
-skills-ref validate <path/to/skill-folder>
-```
-
-（`skills-ref` 是 agentskills.io 官方发布的验证工具；本机没有时跳过，以 `quick_validate` 为准。）
-
-打包后交付 `.skill` 文件供安装。保留原名（如原技能是 `research-helper`，输出 `research-helper.skill`）。先复制到可写位置再编辑。
-
----
+| 场景 | 参考文件 |
+|---|---|
+| 优化 description 触发准确率 | `references/description-optimization.md` |
+| 打包为 `.skill` 单文件分发 | `references/packaging.md` |
+| 查看器各标签页详细说明 | `references/viewer.md` |
+| 盲比 / 分析 benchmark 模式 | `references/advanced.md` |
+| 评测后端可插拔扩展（新 runner） | `references/runners.md` |
 
 ## 参考文件
 
 按需读取：
 
+- `references/schemas.md` — 各 JSON 结构定义（evals.json、grading.json、benchmark.json 等）
+- `references/runners.md` — 评测后端可插拔架构与扩展指南
+- `references/packaging.md` — 打包与脚本命令速查
+- `references/description-optimization.md` — 描述优化完整流程
+- `references/viewer.md` — 评测查看器界面说明
+- `references/advanced.md` — 盲比与 benchmark 分析进阶
 - `agents/grader.md` — 评分指令
 - `agents/comparator.md` — 盲比 A/B 比较
 - `agents/analyzer.md` — 分析 benchmark 结果
-- `references/schemas.md` — 各 JSON 结构定义
-- `references/runners.md` — 评测后端可插拔架构与扩展指南
 - `assets/eval_review.html` — 评测查询审查模板
 - `eval-viewer/generate_review.py` — 评测查看器生成脚本
 
-## 脚本
-
-```bash
-# 汇总 benchmark（须在技能根目录下运行）
-python -m scripts.aggregate_benchmark <workspace>/iteration-N --skill-name <name>
-
-# 生成评测报告
-python -m scripts.generate_report <results.json> -o report.html
-
-# 优化技能描述
-python -m scripts.improve_description --eval-results <eval-results.json> --skill-path <skill-path> --model <model>
-
-# 打包技能
-python -m scripts.package_skill <skill-path> --output <output-dir>
-
-# 快速验证
-python -m scripts.quick_validate <skill-path>
-
-# 运行单次评测
-python -m scripts.run_eval --eval-set <eval-set.json> --skill-path <skill-path>
-
-# 运行优化循环
-python -m scripts.run_loop --eval-set <eval-set.json> --skill-path <skill-path> --model <model>
-
-# 用 OpenAI 兼容端点评测 + 改进（runner 与 llm 可分别指定）
-python -m scripts.run_loop --eval-set <eval-set.json> --skill-path <skill-path> \
-  --runner openai --llm openai --model gpt-4o-mini \
-  --openai-base-url <base-url> --openai-api-key <key>
-```
-
-> 注意：所有 `python -m scripts.*` 命令须从 `skill-creator` 技能根目录（含 `scripts/` 目录的层级）运行。
-> 依赖：先 `pip install -r requirements.txt`（仅 PyYAML）。
+> 环境：依赖先 `pip install -r requirements.txt`（仅 PyYAML）。
 > 测试：`python -m unittest discover -s tests`（无需额外安装）。
