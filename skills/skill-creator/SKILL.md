@@ -345,5 +345,5 @@ cloud-deploy/
 - `assets/eval_review.html` — 评测查询审查模板
 - `eval-viewer/generate_review.py` — 评测查看器生成脚本
 
-> 环境：依赖先 `pip install -r requirements.txt`（仅 PyYAML）。
+> 环境：依赖先 `pip install -r requirements.txt`（仅 PyYAML），Python 3.10+。
 > 测试：`python -m unittest discover -s tests`（无需额外安装）。

@@ -36,6 +36,30 @@
 
 ---
 
+## eval_metadata.json
+
+每次运行评测用例时生成的描述性元数据。位于工作区 `<workspace>/iteration-N/eval-<ID>/eval_metadata.json`。`aggregate_benchmark` 从此文件读取 `eval_id` 与 `eval_name`（后者写入 `benchmark.json` 供查看器展示描述性名称）。
+
+```json
+{
+  "eval_id": 0,
+  "eval_name": "descriptive-name-here",
+  "prompt": "User's example prompt",
+  "expectations": [
+    "The output includes X",
+    "The skill used script Y"
+  ]
+}
+```
+
+**字段说明：**
+- `eval_id`：整数标识符，与 evals.json 中的 `id` 对应
+- `eval_name`：人类可读的评测名称（非 `eval-0` 这类编号），显示在查看器基准页
+- `prompt`：评测的任务 prompt
+- `expectations`：可验证的断言语句列表（可在运行过程中补充）
+
+---
+
 ## history.json
 
 记录改进模式下的版本推进。位于工作区根目录。

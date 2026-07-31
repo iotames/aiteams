@@ -95,6 +95,8 @@ class LoadRunResultsTest(unittest.TestCase):
         # timing comes from grading.json timing block
         self.assertEqual(results["with_skill"][0]["time_seconds"], 165.0)
         self.assertEqual(results["with_skill"][0]["eval_id"], 0)
+        # eval_name 从 eval_metadata.json 传递（viewer 用描述性名称展示）
+        self.assertEqual(results["with_skill"][0]["eval_name"], "first")
         # expectations preserved
         self.assertEqual(len(results["with_skill"][0]["expectations"]), 2)
         # notes from user_notes_summary
@@ -197,6 +199,8 @@ class GenerateBenchmarkTest(unittest.TestCase):
     def test_generate_benchmark_structure(self):
         write_grading(self.tmp / "eval-0" / "with_skill" / "run-1")
         write_grading(self.tmp / "eval-0" / "without_skill" / "run-1")
+        (self.tmp / "eval-0" / "eval_metadata.json").write_text(
+            json.dumps({"eval_id": 0, "eval_name": "first"}), encoding="utf-8")
 
         bench = generate_benchmark(self.tmp, skill_name="pdf")
         self.assertEqual(bench["metadata"]["skill_name"], "pdf")
@@ -208,6 +212,9 @@ class GenerateBenchmarkTest(unittest.TestCase):
         self.assertIn("result", run)
         self.assertIn("expectations", run)
         self.assertIn("notes", run)
+        # eval_name 进入 benchmark.json（viewer.html 依赖该字段展示评测名）
+        self.assertIn("eval_name", run)
+        self.assertEqual(run["eval_name"], "first")
         # run_summary + delta present
         self.assertIn("with_skill", bench["run_summary"])
         self.assertIn("delta", bench["run_summary"])

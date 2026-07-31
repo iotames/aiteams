@@ -87,7 +87,7 @@ def _config_label(config: str) -> str:
     return CONFIG_LABELS.get(config, config.replace("_", " ").title())
 
 
-def _load_run(grading_file: Path, eval_id: int, run_number: int) -> dict | None:
+def _load_run(grading_file: Path, eval_id: int, run_number: int, eval_name: str = "") -> dict | None:
     """把单次运行的 grading.json 解析为聚合结果字典。"""
     try:
         with open(grading_file, encoding="utf-8") as f:
@@ -99,6 +99,7 @@ def _load_run(grading_file: Path, eval_id: int, run_number: int) -> dict | None:
     # 提取指标
     result = {
         "eval_id": eval_id,
+        "eval_name": eval_name,
         "run_number": run_number,
         "pass_rate": grading.get("summary", {}).get("pass_rate", 0.0),
         "passed": grading.get("summary", {}).get("passed", 0),
@@ -169,10 +170,13 @@ def load_run_results(benchmark_dir: Path) -> dict:
 
     for eval_idx, eval_dir in enumerate(sorted(search_dir.glob("eval-*"))):
         metadata_path = eval_dir / "eval_metadata.json"
+        eval_name = ""
         if metadata_path.exists():
             try:
                 with open(metadata_path, encoding="utf-8") as mf:
-                    eval_id = json.load(mf).get("eval_id", eval_idx)
+                    metadata = json.load(mf)
+                    eval_id = metadata.get("eval_id", eval_idx)
+                    eval_name = metadata.get("eval_name", "") or ""
             except (json.JSONDecodeError, OSError):
                 eval_id = eval_idx
         else:
@@ -201,7 +205,7 @@ def load_run_results(benchmark_dir: Path) -> dict:
                     if not grading_file.exists():
                         print(f"警告：{run_dir} 中未找到 grading.json")
                         continue
-                    item = _load_run(grading_file, eval_id, run_number)
+                    item = _load_run(grading_file, eval_id, run_number, eval_name)
                     if item is not None:
                         results[config].append(item)
                 continue
@@ -211,7 +215,7 @@ def load_run_results(benchmark_dir: Path) -> dict:
             if grading_file.exists():
                 if config not in results:
                     results[config] = []
-                item = _load_run(grading_file, eval_id, run_number=1)
+                item = _load_run(grading_file, eval_id, run_number=1, eval_name=eval_name)
                 if item is not None:
                     results[config].append(item)
 
@@ -282,6 +286,7 @@ def generate_benchmark(benchmark_dir: Path, skill_name: str = "", skill_path: st
         for result in results[config]:
             runs.append({
                 "eval_id": result["eval_id"],
+                "eval_name": result.get("eval_name", ""),
                 "configuration": config,
                 "run_number": result["run_number"],
                 "result": {

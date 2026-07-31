@@ -178,6 +178,21 @@ class GenerateHtmlTest(unittest.TestCase):
         html = generate_html([], "s", previous=previous)
         self.assertIn("改一下", html)
 
+    def test_script_closing_tag_escaped(self):
+        """输出含 `</script>` 时不得破坏内联脚本块（HTML 注入防护）。"""
+        runs = [{
+            "id": "eval-0-with_skill",
+            "prompt": "p",
+            "outputs": [{"name": "o.md", "type": "text", "content": "</script><script>alert(1)</script>"}],
+        }]
+        html = generate_html(runs, skill_name="my-skill")
+        # 嵌入的 JSON 内容中 `</` 必须被转义为 `<\/`
+        # （`\/` 在 JSON 与 JS 字符串中都是合法转义，解析时由 JS 还原）
+        self.assertNotIn('"content": "</script>', html)
+        self.assertIn('"content": "<\\/script>', html)
+        # 转义对页面脚本本身无影响：模板的 `</script>` 结束标签仍存在
+        self.assertIn("</script>", html)
+
 
 class LoadPreviousIterationTest(unittest.TestCase):
     def setUp(self):

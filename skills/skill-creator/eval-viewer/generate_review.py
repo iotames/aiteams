@@ -292,6 +292,9 @@ def generate_html(
         embedded["benchmark"] = benchmark
 
     data_json = json.dumps(embedded, ensure_ascii=False)
+    # 防止嵌入数据中的 `</script>` 提前关闭内联脚本标签（HTML 注入/XSS）。
+    # 替换所有 `</` 为 `<\/`——`\/` 在 JSON 与 JS 字符串中都是合法的转义序列。
+    data_json = data_json.replace("</", "<\\/")
 
     return template.replace("/*__EMBEDDED_DATA__*/", f"const EMBEDDED_DATA = {data_json};")
 

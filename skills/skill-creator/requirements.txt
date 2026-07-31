@@ -2,4 +2,5 @@
 # 安装：pip install -r requirements.txt
 # 注意：这是 skill-creator 工具链自己的依赖，与被创建技能的依赖无关；
 # 被创建技能的依赖应声明在其 frontmatter 的 compatibility 字段或 SKILL.md 正文中。
+# Python 版本要求：3.10+（代码使用了 list[str] 与 X | None 类型语法）
 pyyaml>=6.0
