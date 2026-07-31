@@ -6,6 +6,8 @@ description: >-
   当用户要求"截图看看"、"检查 JS 错误"、"提取页面文字"、"验证接口"、"用浏览器打开看看"、"打开浏览器看看"时触发。
   也适用于填写表单、点击按钮、检查网络请求、提取页面信息等浏览器自动化操作。
   自动检测系统已安装的 Chrome/Edge，通过远程调试接口 WebSocket 连接，极轻量无额外依赖。
+metadata:
+  version: 1.0.0
 ---
 
 ## 设计原则
@@ -81,7 +83,11 @@ for fail in net_fails:
     print(f"{fail['url']}: {fail['errorText']}")
 
 client.close()
-os.kill(proc.pid, signal.SIGTERM)
+# 关闭浏览器：Windows 用 terminate()，Linux/macOS 用 SIGTERM
+if os.name == "nt":
+    proc.terminate()
+else:
+    os.kill(proc.pid, signal.SIGTERM)
 ```
 
 无头模式下自动设置 viewport `1280x720`，确保 `getBoundingClientRect()` 返回正确尺寸。
@@ -211,18 +217,21 @@ errors = client.get_console_errors(timeout=2)
 net = client.get_network_errors(timeout=2)
 
 client.close()
-os.kill(proc.pid, signal.SIGTERM)
+# 关闭浏览器：Windows 用 terminate()，Linux/macOS 用 SIGTERM
+if os.name == "nt":
+    proc.terminate()
+else:
+    os.kill(proc.pid, signal.SIGTERM)
 ```
 
 ### 模板：导航各页面检查
 
 ```python
-pages = ["#/dashboard", "#/products", "#/categories",
-         "#/suppliers", "#/stock", "#/purchase-orders"]
+pages = ["#/home", "#/list", "#/detail", "#/settings"]
 for page in pages:
     client.evaluate(f'window.location.hash = "{page}"')
     time.sleep(2)
-    text = client.query_selector("#appContent")
+    text = client.query_selector("#app-main")
     errors = client.get_console_errors(timeout=1)
     print(f"{page}: errors={len(errors)}, text={text[:80]}")
 ```
@@ -233,8 +242,8 @@ for page in pages:
 result = client.evaluate_async("""
 (async () => {
     try {
-        const r = await ApiClient.getProducts({per_page: 5});
-        return JSON.stringify(r.data);
+        const r = await fetch("/api/items", {headers: {Accept: "application/json"}});
+        return await r.text();
     } catch(e) { return "ERR:" + e.message; }
 })()
 """)
@@ -245,12 +254,11 @@ print(result)
 
 ```python
 ops = [
-    ("分类", 'ApiClient.createCategory({name:"办公"})'),
-    ("单位", 'ApiClient.createUnit({name:"箱"})'),
-    ("商品", 'ApiClient.createProduct({code:"P001",name:"A4纸",category_id:1,unit_id:1,...})'),
-    ("采购→入库", 'ApiClient.createPurchaseOrder → receivePurchaseOrder'),
-    ("销售→出库", 'ApiClient.createSaleOrder → shipSaleOrder'),
-    ("库存验证", 'ApiClient.getStock'),
+    ("登录", 'window.app.login({user:"admin", password:"x"})'),
+    ("拉取列表", 'window.app.loadItems({page:1})'),
+    ("获取详情", 'window.app.getItem(1)'),
+    ("保存修改", 'window.app.saveItem({id:1, name:"demo"})'),
+    ("状态验证", 'window.app.getState()'),
 ]
 for name, js in ops:
     r = client.evaluate_async(f'(async()=>{{try{{const r=await {js};return JSON.stringify(r.data)}}catch(e){{return"ERR:"+e.message}}}})()')
@@ -260,11 +268,11 @@ for name, js in ops:
 ### 模板：表单交互
 
 ```python
-client.wait_for_selector("#searchInput", timeout=3)
-client.fill("#searchInput", "关键字")
-client.click("#searchBtn")
+client.wait_for_selector("#search-input", timeout=3)
+client.fill("#search-input", "关键字")
+client.click("#search-btn")
 time.sleep(1)
-results = client.query_selector("#dataBody")
+results = client.query_selector("#results")
 errors = client.get_console_errors(timeout=1)
 ```
 
@@ -274,5 +282,5 @@ errors = client.get_console_errors(timeout=1)
 2. **不要启动 web 服务** — 只连接已有的页面
 3. **截图对我不可见** — 我是纯文本模型，只能通过 evaluate 提取 DOM 文本来"看"页面
 4. **`evaluate` 是核心工具** — 可以读 DOM、调 API、触发事件，比截图有用
-5. **杀 Chrome 用 `killall -9 chrome`** — `pkill -f "pattern"` 和 `ps | awk | xargs kill` 在有大量子进程（renderer/gpu/utility）时极慢（>10s），因为逐个匹配和发信号。`killall -9 chrome` 一次杀所有 `chrome` 命名进程，<1s。注意也会杀 VS Code 等嵌入 Chrome，在自动化测试环境无影响。
-6. **Windows 关闭浏览器用 `proc.terminate()`** — Windows 上 `os.kill(pid, signal.SIGTERM)` 可能无法正确终止进程树，优先使用 `proc.terminate()` 或 `taskkill /f /pid`。
+5. **杀 Chrome（Linux）用 `killall -9 chrome`** — `pkill -f "pattern"` 和 `ps | awk | xargs kill` 在有大量子进程（renderer/gpu/utility）时极慢（>10s），因为逐个匹配和发信号。`killall -9 chrome` 一次杀所有 `chrome` 命名进程，<1s。注意也会杀 VS Code 等嵌入 Chrome，在自动化测试环境无影响。Windows 环境见下一条。
+6. **Windows 关闭浏览器用 `proc.terminate()`** — Windows 上 `os.kill(pid, signal.SIGTERM)` 可能无法正确终止进程树，优先使用 `proc.terminate()` 或 `taskkill /f /pid`。前面所有示例已按平台统一处理。

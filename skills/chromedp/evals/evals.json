@@ -3,49 +3,65 @@
   "evals": [
     {
       "id": 1,
-      "name": "screenshot-local-webapp",
-      "prompt": "我本地启动了一个 Flask 服务在 http://127.0.0.1:5000，帮我打开浏览器截个图看看页面长什么样。",
-      "expected_output": "Launch Chrome → screenshot → get title/body text → report console errors → close Chrome.",
-      "steps": ["chromedp_launch", "screenshot", "evaluate(document.title)", "get_console_errors"],
-      "files": []
+      "prompt": "我本地启动了一个网页服务在 http://127.0.0.1:8000，帮我用浏览器打开截个图看看页面长什么样。",
+      "expected_output": "启动浏览器 → 截图保存 PNG → 提取 title 和正文文本 → 报告 console 错误 → 关闭浏览器并汇报页面概况",
+      "files": [],
+      "expectations": [
+        "使用 chromedp_launch 启动浏览器并连接 CDP",
+        "用 CDPClient.screenshot 保存 PNG 截图并给出文件路径",
+        "用 evaluate 提取 document.title 与页面正文",
+        "用 get_console_errors 检查页面 JS 错误",
+        "结束时关闭浏览器进程"
+      ]
     },
     {
       "id": 2,
-      "name": "debug-js-errors",
-      "prompt": "帮我检查一下 http://127.0.0.1:5000 这个页面有没有 JS 错误，把所有 console 报错列出来。",
-      "expected_output": "Navigate all main pages of the app, collect console errors/warnings from each, report them grouped by page.",
-      "steps": ["Launch", "get_console_errors per page", "report findings"],
-      "files": []
+      "prompt": "帮我检查一下 http://127.0.0.1:8000 这个页面有没有 JS 错误，把所有 console 报错列出来。",
+      "expected_output": "连接浏览器 → 导航/刷新目标页 → 收集 console error/warning → 按错误级别和文本汇报",
+      "files": [],
+      "expectations": [
+        "用 CDPClient 连接 http://127.0.0.1:8000",
+        "用 get_console_errors 收集 console 错误",
+        "输出中包含每条错误的 level 与 text",
+        "若页面存在 JS 报错则明确指出具体错误信息"
+      ]
     },
     {
       "id": 3,
-      "name": "extract-page-content",
-      "prompt": "用浏览器打开 http://127.0.0.1:5000，然后把页面里能看到的所有文字内容提取出来给我。",
-      "expected_output": "Full text of each page (dashboard, products, categories, etc.) extracted via query_selector or evaluate.",
-      "steps": ["navigate each route", "query_selector('#appContent')", "report text"],
-      "files": []
+      "prompt": "用浏览器打开 http://127.0.0.1:8000，然后把页面里能看到的所有文字内容提取出来给我。",
+      "expected_output": "提取页面主要可见文本（标题、正文、列表等），按区块组织后汇报",
+      "files": [],
+      "expectations": [
+        "用 CDPClient 连接目标页",
+        "用 query_selector 或 evaluate 提取页面可见文本",
+        "输出包含页面 title",
+        "输出包含页面正文主要内容"
+      ]
     },
     {
       "id": 4,
-      "name": "check-api-network-errors",
-      "prompt": "帮我验证 http://127.0.0.1:5000 这个网页的所有 API 请求是否都正常返回了，有没有 404 或 500 的请求。",
-      "expected_output": "For each page, report get_network_errors() results. If no errors, confirm all APIs OK.",
-      "steps": ["per page: navigate → wait → get_network_errors"],
-      "files": []
+      "prompt": "帮我验证 http://127.0.0.1:8000 这个网页的所有请求是否都正常返回了，有没有 404 或 500 的请求。",
+      "expected_output": "收集页面加载期间的所有网络请求与响应状态码，报告失败请求（非 2xx）的 URL 与状态",
+      "files": [],
+      "expectations": [
+        "用 get_network_requests 或 get_network_errors 检查网络请求",
+        "输出中包含请求 URL 与响应状态码",
+        "明确指出是否存在 4xx/5xx 失败请求",
+        "若全部正常则明确确认无错误"
+      ]
     },
     {
       "id": 5,
-      "name": "full-workflow-test",
-      "prompt": "帮我测试 http://127.0.0.1:5000 这个进销存系统的完整业务流程：创建分类/商品/供应商/客户，创建采购订单并入库，创建销售订单并出库，验证库存和报表。",
-      "expected_output": "Execute all CRUD operations via evaluate_async, verify each step succeeds, confirm final stock and report data are correct.",
-      "steps": [
-        "evaluate_async createCategory/createUnit/createProduct",
-        "evaluate_async createSupplier/createCustomer",
-        "evaluate_async createPurchaseOrder → receivePurchaseOrder",
-        "evaluate_async createSaleOrder → shipSaleOrder",
-        "verify getStock and getReportSummary"
-      ],
-      "files": []
+      "prompt": "帮我用浏览器在 http://127.0.0.1:8000 的页面上做一次表单交互：在搜索框输入关键字、点击搜索按钮，然后看结果区显示了什么。",
+      "expected_output": "等待搜索框出现 → 填写关键字 → 点击搜索按钮 → 读取结果区文本 → 检查过程有无 JS 错误",
+      "files": [],
+      "expectations": [
+        "用 wait_for_selector 等待搜索框出现",
+        "用 fill 填写关键字",
+        "用 click 点击搜索按钮",
+        "用 query_selector 读取结果区文本并汇报",
+        "用 get_console_errors 确认交互过程无新增 JS 错误"
+      ]
     }
   ]
 }

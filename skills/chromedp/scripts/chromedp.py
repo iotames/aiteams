@@ -302,13 +302,15 @@ class CDPClient:
         for attempt in range(2):
             try:
                 self.ws.send(json.dumps(msg))
-                return self._recv_response(self._msg_id)
+                return self._recv_response(msg["id"])
             except websocket.WebSocketException as e:
                 if attempt == 1:
                     raise CDPConnectionError(
                         f'CDP command "{method}" failed after retry: {e}'
                     )
                 self._reconnect_ws()
+                # 重连期间 _reconnect_ws 已推进 _msg_id，重新同步 msg id
+                msg["id"] = self._msg_id
 
     def _recv_response(self, msg_id):
         """Receive responses until the one matching msg_id arrives.
@@ -421,7 +423,9 @@ class CDPClient:
         if url:
             new_url += "?" + urllib.parse.urlencode({"url": url})
         try:
-            info = json.loads(urllib.request.urlopen(new_url, timeout=5).read())
+            # Chrome 88+ 要求 PUT 方法创建新标签页
+            req = urllib.request.Request(new_url, method="PUT")
+            info = json.loads(urllib.request.urlopen(req, timeout=5).read())
             old_ws = self.ws
             self.ws = websocket.create_connection(
                 info["webSocketDebuggerUrl"], timeout=self._timeout
@@ -748,9 +752,16 @@ class CDPClient:
 
     def get_network_errors(self, timeout=1.0):
         events = self._collect_events(timeout=timeout)
+        # Network.loadingFailed 事件不含 URL，需用 requestId 关联
+        # Network.requestWillBeSent 记录获取请求地址
+        url_by_id = {
+            ev["params"]["requestId"]: ev["params"]["request"].get("url", "")
+            for ev in events
+            if ev["method"] == "Network.requestWillBeSent"
+        }
         return [
             {
-                "url": ev["params"].get("documentURL", ""),
+                "url": url_by_id.get(ev["params"].get("requestId", ""), ""),
                 "errorText": ev["params"].get("errorText", ""),
                 "type": ev["params"].get("type", ""),
             }
