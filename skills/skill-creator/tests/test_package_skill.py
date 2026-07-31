@@ -1,7 +1,7 @@
-"""unittest suite for scripts.package_skill.
+"""scripts.package_skill 的 unittest 测试套件。
 
-Covers should_exclude rules and end-to-end packaging with a real (valid) skill
-folder. Uses no network; validation runs against the real quick_validate rules.
+覆盖 should_exclude 规则以及使用真实（合法）技能目录的端到端打包。
+不联网；校验使用真实的 quick_validate 规则。
 """
 
 import tempfile

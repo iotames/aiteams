@@ -1,15 +1,18 @@
-"""Shared utilities for skill-creator scripts."""
+"""skill-creator 各脚本共享的工具函数。"""
 
+import inspect
 import io
 import sys
 from pathlib import Path
 
+import yaml
+
 
 def ensure_utf8_stdio() -> None:
-    """Reconfigure stdout/stderr to UTF-8 so non-ASCII output never crashes
-    on Windows consoles (GBK) or other locale-dependent terminals.
+    """将 stdout/stderr 重新配置为 UTF-8，避免非 ASCII 输出在
+    Windows 控制台（GBK）等依赖区域设置的终端中崩溃。
 
-    Safe no-op when reconfigure is unavailable (Python < 3.7).
+    当 reconfigure 不可用（Python < 3.7）时安全地跳过。
     """
     for stream in (sys.stdout, sys.stderr):
         try:
@@ -18,20 +21,35 @@ def ensure_utf8_stdio() -> None:
             pass
 
 
+def filter_kwargs(cls: type, kwargs: dict) -> dict:
+    """只返回目标类 __init__ 实际接受的 kwargs。
+
+    用于后端工厂（runners/__init__.py、llm.py），这样 base_url/api_key 等
+    提供方相关的选项可以传给支持它们的实现，而被其余实现无害地忽略。
+    """
+    if not kwargs:
+        return {}
+    try:
+        params = inspect.signature(cls.__init__).parameters
+    except (TypeError, ValueError):
+        return {}
+    accepted = {p for p in params if p != "self"}
+    return {k: v for k, v in kwargs.items() if k in accepted}
+
+
 def prompt_choose_backend(kind: str, candidates: dict[str, str], flag: str,
                           recommended: str | None = None) -> str:
-    """Ask the user which model backend to use for evaluation/improvement.
+    """询问用户使用哪个模型后端进行评测/改进。
 
-    Detection only *lists* candidates — the choice is always the user's.
-    Prints candidates, lets the user type a name or press Enter for the
-    recommended default. Raises RuntimeError in non-interactive environments
-    (no stdin) so callers can require an explicit --runner/--llm flag.
+    探测只负责*列出*候选——选择权始终在用户。打印候选列表，允许用户输入
+    名称或回车使用推荐项。在非交互环境（无 stdin）下抛 RuntimeError，
+    要求调用方显式传入 --runner/--llm 参数。
 
-    Args:
-        kind: human label, e.g. "评测后端 (runner)" / "描述改进模型 (llm)"
-        candidates: {name: note} from detect_available_runners()/llms()
-        flag: the CLI flag to suggest, e.g. "--runner"
-        recommended: name to offer as default (first candidate if None)
+    参数：
+        kind: 人类可读标签，例如 "评测后端 (runner)" / "描述改进模型 (llm)"
+        candidates: detect_available_runners()/llms() 返回的 {名称: 说明}
+        flag: 需要提示的 CLI 参数，例如 "--runner"
+        recommended: 作为默认值提供的名称（None 时取第一个候选）
     """
     if not candidates:
         raise RuntimeError(
@@ -65,12 +83,16 @@ def prompt_choose_backend(kind: str, candidates: dict[str, str], flag: str,
 
 
 def parse_skill_md(skill_path: Path) -> tuple[str, str, str]:
-    """Parse a SKILL.md file, returning (name, description, full_content)."""
+    """解析 SKILL.md 文件，返回 (name, description, full_content)。
+
+    使用 PyYAML 解析 frontmatter（与 quick_validate 一致），确保块标量
+    （>、| 等）、带引号字符串、折叠语义在整个工具链中行为一致。
+    """
     content = (skill_path / "SKILL.md").read_text(encoding="utf-8")
     lines = content.split("\n")
 
-    if lines[0].strip() != "---":
-        raise ValueError("SKILL.md missing frontmatter (no opening ---)")
+    if not lines or lines[0].strip() != "---":
+        raise ValueError("SKILL.md 缺少 frontmatter（没有开头的 ---）")
 
     end_idx = None
     for i, line in enumerate(lines[1:], start=1):
@@ -79,29 +101,26 @@ def parse_skill_md(skill_path: Path) -> tuple[str, str, str]:
             break
 
     if end_idx is None:
-        raise ValueError("SKILL.md missing frontmatter (no closing ---)")
+        raise ValueError("SKILL.md 缺少 frontmatter（没有结尾的 ---）")
 
-    name = ""
-    description = ""
-    frontmatter_lines = lines[1:end_idx]
-    i = 0
-    while i < len(frontmatter_lines):
-        line = frontmatter_lines[i]
-        if line.startswith("name:"):
-            name = line[len("name:"):].strip().strip('"').strip("'")
-        elif line.startswith("description:"):
-            value = line[len("description:"):].strip()
-            # Handle YAML multiline indicators (>, |, >-, |-, >+, |+)
-            if value in (">", "|", ">-", "|-", ">+", "|+"):
-                continuation_lines: list[str] = []
-                i += 1
-                while i < len(frontmatter_lines) and (frontmatter_lines[i].startswith("  ") or frontmatter_lines[i].startswith("\t")):
-                    continuation_lines.append(frontmatter_lines[i].strip())
-                    i += 1
-                description = " ".join(continuation_lines)
-                continue
-            else:
-                description = value.strip('"').strip("'")
-        i += 1
+    frontmatter_text = "\n".join(lines[1:end_idx])
+    try:
+        frontmatter = yaml.safe_load(frontmatter_text)
+    except yaml.YAMLError as e:
+        raise ValueError(f"frontmatter 中的 YAML 无效：{e}") from e
+    if not isinstance(frontmatter, dict):
+        raise ValueError("SKILL.md frontmatter 必须是 YAML 字典")
 
-    return name, description, content
+    name = frontmatter.get("name")
+    if name is None:
+        raise ValueError("SKILL.md frontmatter 缺少 'name'")
+    if not isinstance(name, str):
+        name = str(name)
+
+    description = frontmatter.get("description")
+    if description is None:
+        description = ""
+    elif not isinstance(description, str):
+        description = str(description)
+
+    return name.strip(), description.strip(), content

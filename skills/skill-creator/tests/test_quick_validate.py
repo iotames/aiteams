@@ -1,6 +1,6 @@
-"""unittest suite for scripts.quick_validate.
+"""scripts.quick_validate 的 unittest 测试套件。
 
-Run from the skill-creator root:
+在 skill-creator 根目录运行：
     python -m unittest discover -s tests -v
 """
 
@@ -36,7 +36,7 @@ class QuickValidateTest(unittest.TestCase):
     def test_missing_skill_md(self):
         ok, msg = validate_skill(self.tmp / "nope")
         self.assertFalse(ok)
-        self.assertIn("SKILL.md not found", msg)
+        self.assertIn("SKILL.md 不存在", msg)
 
     def test_no_frontmatter(self):
         d = self.tmp / "x"
@@ -44,7 +44,7 @@ class QuickValidateTest(unittest.TestCase):
         (d / "SKILL.md").write_text("# no frontmatter", encoding="utf-8")
         ok, msg = validate_skill(d)
         self.assertFalse(ok)
-        self.assertIn("No YAML frontmatter", msg)
+        self.assertIn("未找到 YAML frontmatter", msg)
 
     def test_invalid_yaml(self):
         d = self.tmp / "x"
@@ -74,7 +74,7 @@ class QuickValidateTest(unittest.TestCase):
             "---\nname: other-name\ndescription: desc\n---\n\n# x\n", encoding="utf-8")
         ok, msg = validate_skill(skill_dir)
         self.assertFalse(ok)
-        self.assertIn("does not match the parent directory name", msg)
+        self.assertIn("与父目录名称", msg)
 
     def test_name_leading_hyphen_rejected(self):
         d = write_skill(self.tmp, name="-pdf")
@@ -96,7 +96,7 @@ class QuickValidateTest(unittest.TestCase):
         d = write_skill(self.tmp, name=long_name)
         ok, msg = validate_skill(d)
         self.assertFalse(ok)
-        self.assertIn("Maximum is 64", msg)
+        self.assertIn("最大为 64", msg)
 
     def test_name_with_underscore_rejected(self):
         d = write_skill(self.tmp, name="my_skill")
@@ -111,7 +111,7 @@ class QuickValidateTest(unittest.TestCase):
         (d / "SKILL.md").write_text("---\nname: valid-skill\n---\n\n# x\n", encoding="utf-8")
         ok, msg = validate_skill(d)
         self.assertFalse(ok)
-        self.assertIn("Missing 'description'", msg)
+        self.assertIn("缺少 'description'", msg)
 
     def test_description_empty(self):
         d = self.tmp / "valid-skill"
@@ -125,7 +125,7 @@ class QuickValidateTest(unittest.TestCase):
         d = write_skill(self.tmp, extra_frontmatter=f"description: {'x' * 1025}")
         ok, msg = validate_skill(d)
         self.assertFalse(ok)
-        self.assertIn("Maximum is 1024", msg)
+        self.assertIn("最大为 1024", msg)
 
     def test_description_angle_brackets_rejected(self):
         d = write_skill(self.tmp, extra_frontmatter="description: has <b>html</b>")
@@ -138,13 +138,13 @@ class QuickValidateTest(unittest.TestCase):
         d = write_skill(self.tmp, extra_frontmatter="allowed-tools:\n  - Read\n  - Write")
         ok, msg = validate_skill(d)
         self.assertFalse(ok)
-        self.assertIn("space-separated string", msg)
+        self.assertIn("空格分隔的字符串", msg)
 
     def test_allowed_tools_comma_rejected(self):
         d = write_skill(self.tmp, extra_frontmatter="allowed-tools: Read, Write")
         ok, msg = validate_skill(d)
         self.assertFalse(ok)
-        self.assertIn("space-separated", msg)
+        self.assertIn("以空格分隔", msg)
 
     def test_allowed_tools_ok(self):
         d = write_skill(self.tmp, extra_frontmatter="allowed-tools: Read Write Bash(git:*)")
@@ -157,7 +157,7 @@ class QuickValidateTest(unittest.TestCase):
         d = write_skill(self.tmp, extra_frontmatter="bogus-field: 1")
         ok, msg = validate_skill(d)
         self.assertFalse(ok)
-        self.assertIn("Unexpected key", msg)
+        self.assertIn("意外键", msg)
 
     # --- metadata rules ---
 
@@ -165,7 +165,7 @@ class QuickValidateTest(unittest.TestCase):
         d = write_skill(self.tmp, extra_frontmatter="metadata:\n  version: 1.0")
         ok, msg = validate_skill(d)
         self.assertFalse(ok)
-        self.assertIn("must all be strings", msg)
+        self.assertIn("必须全部是字符串", msg)
 
     def test_metadata_ok(self):
         d = write_skill(self.tmp, extra_frontmatter="metadata:\n  version: \"1.0\"")
@@ -179,7 +179,7 @@ class QuickValidateTest(unittest.TestCase):
         (d / "LICENSE.txt").write_text("MIT\n", encoding="utf-8")
         ok, msg = validate_skill(d)
         self.assertTrue(ok)
-        self.assertIn("Warning", msg)
+        self.assertIn("警告", msg)
 
     # --- evals.json schema ---
 
@@ -201,7 +201,7 @@ class QuickValidateTest(unittest.TestCase):
             __import__("json").dumps(evals), encoding="utf-8")
         ok, msg = validate_skill(d)
         self.assertFalse(ok)
-        self.assertIn("does not match frontmatter", msg)
+        self.assertIn("与 frontmatter 中的", msg)
 
     def test_evals_extra_fields_warn(self):
         d = write_skill(self.tmp)
@@ -214,7 +214,7 @@ class QuickValidateTest(unittest.TestCase):
             __import__("json").dumps(evals), encoding="utf-8")
         ok, msg = validate_skill(d)
         self.assertTrue(ok)
-        self.assertIn("outside the schema", msg)
+        self.assertIn("schema 之外的字段", msg)
 
     def test_evals_valid(self):
         d = write_skill(self.tmp)

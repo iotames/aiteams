@@ -1,19 +1,16 @@
-"""OpenAI-compatible API runner.
+"""OpenAI 兼容 API runner。
 
-Drives any chat-completions-compatible HTTP endpoint (OpenAI, or any
-OpenAI-compatible proxy/gateway) with the tools mechanism: the skill
-description is exposed as a `skill_trigger` tool, and the model is instructed
-to call it iff the query falls within the skill's scope. The model is
-considered to have triggered the skill when its response contains a
-`skill_trigger` tool call.
+驱动任意 chat-completions 兼容的 HTTP 端点（OpenAI，或任意
+OpenAI 兼容代理/网关），使用工具机制：技能描述作为 `skill_trigger`
+工具暴露给模型，并指示模型仅在 query 落在技能范围内时调用它。
+模型响应中出现 `skill_trigger` 工具调用即视为触发了技能。
 
-Configuration:
-- `--openai-base-url` / OPENAI_BASE_URL (default https://api.openai.com/v1)
+配置：
+- `--openai-base-url` / OPENAI_BASE_URL（默认 https://api.openai.com/v1）
 - `--openai-api-key` / OPENAI_API_KEY
-- `--model` (required)
+- `--model`（必需）
 
-Uses only the Python standard library (urllib), so no extra dependency is
-needed.
+仅使用 Python 标准库（urllib），无需额外依赖。
 """
 
 import json
@@ -26,8 +23,8 @@ from scripts.runners.base import SkillContext, TriggerResult
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 
-# Tool exposed to the model. The description field carries the skill's
-# description; name must be unique per skill so a stale call can't match.
+# 暴露给模型的工具。描述字段承载技能描述；名称必须对每个技能唯一，
+# 避免过期的调用被误匹配。
 TOOL_NAME = "skill_trigger"
 
 SYSTEM_PROMPT_TEMPLATE = (
@@ -45,7 +42,7 @@ def build_chat_body(
     skill_ctx: SkillContext,
     model: str,
 ) -> dict:
-    """Build the chat.completions request body. Pure function, unit-testable."""
+    """构造 chat.completions 请求体。纯函数，可单元测试。"""
     tool_description = (
         f"Activate the skill '{skill_ctx.skill_name}'. "
         f"Skill description: {skill_ctx.description}"
@@ -88,14 +85,14 @@ def build_chat_body(
 
 
 def triggered_by_response(payload: dict, skill_name: str) -> tuple[bool, str]:
-    """Decide whether a chat.completions response indicates a trigger.
+    """判断 chat.completions 响应是否表示触发。
 
-    Returns (triggered, evidence). Pure function, unit-testable.
+    返回 (triggered, evidence)。纯函数，可单元测试。
     """
     try:
         message = payload["choices"][0]["message"]
     except (KeyError, IndexError, TypeError) as e:
-        return False, f"malformed response: {e}"
+        return False, f"响应格式异常：{e}"
 
     tool_calls = message.get("tool_calls") or []
     for call in tool_calls:
@@ -103,13 +100,13 @@ def triggered_by_response(payload: dict, skill_name: str) -> tuple[bool, str]:
         if fn.get("name") == TOOL_NAME:
             args = fn.get("arguments", "")
             if skill_name in args:
-                return True, f"tool_call {TOOL_NAME} with skill={skill_name}"
-            return True, f"tool_call {TOOL_NAME} (arguments: {args[:120]})"
-    return False, "no skill_trigger tool call in response"
+                return True, f"工具调用 {TOOL_NAME}，skill={skill_name}"
+            return True, f"工具调用 {TOOL_NAME}（参数：{args[:120]}）"
+    return False, "响应中无 skill_trigger 工具调用"
 
 
 class OpenAICompatRunner:
-    """Trigger-evaluation backend that drives a chat-completions HTTP API."""
+    """驱动 chat-completions HTTP API 的触发评测后端。"""
 
     name = "openai"
 
@@ -128,13 +125,13 @@ class OpenAICompatRunner:
         if not model:
             return TriggerResult(
                 triggered=False,
-                evidence="--model is required for the openai runner",
+                evidence="openai runner 需要 --model",
                 error="missing model",
             )
         if not self.api_key:
             return TriggerResult(
                 triggered=False,
-                evidence="OPENAI_API_KEY or --openai-api-key required",
+                evidence="需要 OPENAI_API_KEY 或 --openai-api-key",
                 error="missing api key",
             )
 
@@ -157,13 +154,13 @@ class OpenAICompatRunner:
             detail = e.read().decode("utf-8", errors="replace")[:300]
             return TriggerResult(
                 triggered=False,
-                evidence=f"HTTP {e.code}: {detail}",
+                evidence=f"HTTP {e.code}：{detail}",
                 error=f"http {e.code}",
             )
         except Exception as e:
             return TriggerResult(
                 triggered=False,
-                evidence=f"request failed: {e}",
+                evidence=f"请求失败：{e}",
                 error=str(e),
             )
 
@@ -172,7 +169,7 @@ class OpenAICompatRunner:
         except json.JSONDecodeError as e:
             return TriggerResult(
                 triggered=False,
-                evidence=f"non-JSON response: {e}",
+                evidence=f"非 JSON 响应：{e}",
                 error=str(e),
             )
 
@@ -181,16 +178,15 @@ class OpenAICompatRunner:
 
 
 if __name__ == "__main__":
-    # Minimal self-check: print the request body for the first eval in an
-    # eval-set file, without sending anything.
+    # 最小自检：打印 eval-set 文件中第一条 eval 的请求体，不发送任何请求。
     import argparse
     import sys
 
     from scripts.utils import ensure_utf8_stdio
 
     ensure_utf8_stdio()
-    parser = argparse.ArgumentParser(description="Inspect OpenAI runner request body")
-    parser.add_argument("eval_set", help="Path to trigger-eval JSON (list of {query, should_trigger})")
+    parser = argparse.ArgumentParser(description="检查 OpenAI runner 请求体")
+    parser.add_argument("eval_set", help="触发评测 JSON 路径（list of {query, should_trigger}）")
     parser.add_argument("--skill-name", default="example-skill")
     parser.add_argument("--skill-description", default="Example description")
     parser.add_argument("--model", default="gpt-4o-mini")

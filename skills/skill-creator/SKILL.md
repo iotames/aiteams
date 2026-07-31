@@ -36,6 +36,19 @@ SKILL.md 是写给 AI 模型看的**使用说明书**，不是技术实现文档
 
 **关键原则：** 告诉模型「怎么用」，或者「调用的示例代码」，而不是告诉模型「技能代码和原理」。
 
+### 语言约定
+
+使用本工具创建或修改技能时，**默认语言为简体中文**，适用于：
+
+- **SKILL.md 正文**：指令、说明、示例、注意事项
+- **代码注释**：脚本、模板中的注释和文档字符串
+- **用户交互文本**：CLI 输出、报错信息、界面文案、网页 UI
+- **各类文档**：README、操作手册、参考文档、变更记录等
+
+保留原文的例外：代码标识符（变量名、函数名、类名等）保持英文；技术术语（YAML、API、kebab-case 等）可保留原文；发给 LLM 的 prompt 文本不受此限，按需使用。
+
+> 本工具链自身已遵循此约定：脚本注释、CLI 输出、评测报告、HTML 查看器均为简体中文。
+
 > 依赖声明约定：新技能的依赖**不强制** requirements.txt —— 依赖什么语言就声明什么，写在 frontmatter 的 `compatibility` 字段（≤500 字符，如 `Requires Python 3.14+ and uv`）或 SKILL.md 正文「环境要求」节。requirements.txt 仅用于本技能（skill-creator）自身工具链的运行时依赖。
 
 ---
@@ -163,6 +176,18 @@ cloud-deploy/
 
 结果放在 `<skill-name>-workspace/` 目录（与技能目录同级）。按迭代组织（`iteration-1/`、`iteration-2/`...），每个测试用例一个子目录（`eval-0/`、`eval-1/`...）。运行时逐步创建。
 
+目录结构约定（`aggregate_benchmark` 与查看器按此发现运行）：
+
+```
+<skill-name>-workspace/iteration-N/
+└── eval-<ID>/
+    ├── eval_metadata.json
+    └── <config>/                # with_skill / without_skill（或 new_skill / old_skill）
+        ├── grading.json         # 布局 A：单次运行直接放在 config 目录下
+        ├── outputs/…            # 输出文件
+        └── run-1/grading.json   # 布局 B：多次运行时用 run-N/ 子目录
+```
+
 ### 第 1 步：同轮次并行启动所有运行
 
 每个测试用例同时启动两个子任务——**带技能**和**基准**。不要先跑带技能的再补基准，一次全部启动。
@@ -216,7 +241,7 @@ cloud-deploy/
 
 ### 第 4 步：评分、汇总、启动查看器
 
-1. **评分** — 逐条判断断言是否通过，保存到各运行目录的 `grading.json`。`expectations` 数组必须使用 `text`、`passed`、`evidence` 字段（非 `name`/`met`/`details`）。可用脚本自动检查的优先写脚本。
+1. **评分** — 逐条判断断言是否通过，保存到各运行目录的 `grading.json`（单次运行放 `config/` 下，多次运行放 `config/run-N/` 下，见上文目录结构）。`expectations` 数组必须使用 `text`、`passed`、`evidence` 字段（非 `name`/`met`/`details`）。可用脚本自动检查的优先写脚本。
 
 2. **汇总 benchmark** —
    ```bash

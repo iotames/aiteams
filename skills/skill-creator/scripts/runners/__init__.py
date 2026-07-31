@@ -1,51 +1,37 @@
-"""Runner registry for skill-trigger evaluation backends.
+"""技能触发评测后端的注册表。
 
-Add a new backend by implementing the Runner protocol (scripts/runners/base.py)
-and registering it here. See references/runners.md for the extension guide.
+新增后端：实现 Runner 协议（scripts/runners/base.py）并在本文件注册。
+扩展指南见 references/runners.md。
 
-Important: the runner is only the *evaluation test rig* — it decides which
-real agent executes the trigger queries. The skill itself (SKILL.md + scripts)
-stays model-agnostic and is never coupled to any runner.
+重要：runner 只是*评测试金石*——它决定由哪个真实智能体执行触发查询。
+技能本体（SKILL.md + scripts）保持模型无关，绝不与任何 runner 耦合。
 
-Selection policy: the CLI asks the USER which backend to use (interactive
-prompt); detection only lists candidates and never decides on its own.
-`get_runner()` therefore requires an explicit name — pass one, or call
-detect_available_runners() first and let the user pick.
+选择策略：CLI 会询问**用户**使用哪个后端（交互式提示）；探测只列出候选，
+绝不自行决定。因此 `get_runner()` 要求显式名称——要么传一个，要么先调用
+detect_available_runners() 再由用户选择。
 """
 
-import inspect
 import os
 import shutil
 
 from scripts.runners.base import Runner, SkillContext, TriggerResult
 from scripts.runners.claude_code import ClaudeCodeRunner, ClaudeStreamTriggerParser
 from scripts.runners.openai import OpenAICompatRunner
+from scripts.utils import filter_kwargs
 
 _RUNNERS: dict[str, type] = {
     "claude-code": ClaudeCodeRunner,
-    "claude": ClaudeCodeRunner,          # alias
+    "claude": ClaudeCodeRunner,          # 别名
     "openai": OpenAICompatRunner,
-    "openai-compatible": OpenAICompatRunner,  # alias
+    "openai-compatible": OpenAICompatRunner,  # 别名
 }
 
 
-def _filter_kwargs(cls: type, kwargs: dict) -> dict:
-    """Pass only kwargs the target class __init__ actually accepts."""
-    if not kwargs:
-        return {}
-    try:
-        params = inspect.signature(cls.__init__).parameters
-    except (TypeError, ValueError):
-        return {}
-    accepted = {p for p in params if p != "self"}
-    return {k: v for k, v in kwargs.items() if k in accepted}
-
-
 def detect_available_runners() -> dict[str, str]:
-    """Probe the local environment; return {runner_name: note} candidates.
+    """探测本地环境，返回 {runner_name: 说明} 候选。
 
-    Probing is advisory only — it never picks a backend. "claude" existing on
-    PATH does NOT mean it is usable; the user must confirm the choice.
+    探测仅供参考——绝不代用户选择后端。"claude" 存在于 PATH 并不代表可用；
+    用户必须确认选择。
     """
     found: dict[str, str] = {}
     if shutil.which("claude"):
@@ -56,19 +42,18 @@ def detect_available_runners() -> dict[str, str]:
 
 
 def get_runner(name: str, **kwargs) -> Runner:
-    """Build a runner by explicit name. Unknown names raise ValueError.
+    """按显式名称构造 runner。未知名称抛 ValueError。
 
-    `name` is required — the CLI asks the user which backend to use and passes
-    the result here; detection never decides automatically. Provider-specific
-    kwargs (e.g. base_url/api_key for openai) are passed to the runner
-    constructor; kwargs the chosen implementation doesn't accept are ignored.
+    `name` 是必需的——CLI 询问用户使用哪个后端并把结果传到这里；探测
+    从不自动决定。提供方相关的 kwargs（如 openai 的 base_url/api_key）
+    会传给 runner 构造函数；所选实现不接受的 kwargs 会被忽略。
     """
     key = name.lower()
     if key not in _RUNNERS:
         raise ValueError(
-            f"Unknown runner '{name}'. Available: {sorted(set(_RUNNERS))}"
+            f"未知 runner '{name}'。可用：{sorted(set(_RUNNERS))}"
         )
-    return _RUNNERS[key](**_filter_kwargs(_RUNNERS[key], kwargs))
+    return _RUNNERS[key](**filter_kwargs(_RUNNERS[key], kwargs))
 
 
 __all__ = [

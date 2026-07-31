@@ -1,7 +1,7 @@
-"""unittest suite for scripts.aggregate_benchmark.
+"""scripts.aggregate_benchmark 的 unittest 测试套件。
 
-Covers calculate_stats, load_run_results (both workspace layouts), aggregate_results,
-generate_benchmark and generate_markdown. Pure functions — no network, no subprocess.
+覆盖 calculate_stats、load_run_results（两种工作区布局）、aggregate_results、
+generate_benchmark 与 generate_markdown。纯函数 —— 无网络、无子进程。
 """
 
 import json
@@ -110,6 +110,24 @@ class LoadRunResultsTest(unittest.TestCase):
         # eval id derived from directory name
         self.assertEqual(results["with_skill"][0]["eval_id"], 1)
 
+    def test_flat_single_run_layout_without_run_subdir(self):
+        """config 目录下直接放 grading.json（无 run-N 层）也应被收集。"""
+        g = make_grading(pass_rate=0.9, passed=9, total=10)
+        (self.tmp / "eval-0" / "with_skill").mkdir(parents=True)
+        (self.tmp / "eval-0" / "with_skill" / "grading.json").write_text(
+            json.dumps(g), encoding="utf-8")
+        (self.tmp / "eval-0" / "without_skill").mkdir()
+        (self.tmp / "eval-0" / "without_skill" / "grading.json").write_text(
+            json.dumps(make_grading(pass_rate=0.3, passed=3, total=10)), encoding="utf-8")
+
+        results = load_run_results(self.tmp)
+        self.assertEqual(len(results["with_skill"]), 1)
+        self.assertEqual(results["with_skill"][0]["pass_rate"], 0.9)
+        self.assertEqual(results["with_skill"][0]["run_number"], 1)
+        self.assertEqual(len(results["without_skill"]), 1)
+        # outputs/ 目录（仅含子文件，无 grading.json）不会被误判为 config
+        self.assertNotIn("outputs", results)
+
     def test_missing_grading_warns_but_continues(self):
         (self.tmp / "eval-0" / "with_skill" / "run-1").mkdir(parents=True)
         results = load_run_results(self.tmp)
@@ -194,17 +212,27 @@ class GenerateBenchmarkTest(unittest.TestCase):
         self.assertIn("with_skill", bench["run_summary"])
         self.assertIn("delta", bench["run_summary"])
 
+    def test_runs_per_configuration_dynamic(self):
+        """runs_per_configuration 应从实际运行次数计算，而非硬编码。"""
+        write_grading(self.tmp / "eval-0" / "with_skill" / "run-1")
+        write_grading(self.tmp / "eval-0" / "with_skill" / "run-2")
+        write_grading(self.tmp / "eval-0" / "without_skill" / "run-1")
+        write_grading(self.tmp / "eval-0" / "without_skill" / "run-2")
+
+        bench = generate_benchmark(self.tmp, skill_name="pdf")
+        self.assertEqual(bench["metadata"]["runs_per_configuration"], 2)
+
     def test_generate_markdown_has_metric_rows(self):
         write_grading(self.tmp / "eval-0" / "with_skill" / "run-1")
         write_grading(self.tmp / "eval-0" / "without_skill" / "run-1")
         bench = generate_benchmark(self.tmp, skill_name="pdf")
         md = generate_markdown(bench)
-        self.assertIn("# Skill Benchmark: pdf", md)
-        self.assertIn("Pass Rate", md)
-        self.assertIn("Time", md)
-        self.assertIn("Tokens", md)
-        self.assertIn("With Skill", md)
-        self.assertIn("Without Skill", md)
+        self.assertIn("# 技能基准：pdf", md)
+        self.assertIn("通过率", md)
+        self.assertIn("耗时", md)
+        self.assertIn("Token", md)
+        self.assertIn("带技能", md)
+        self.assertIn("不带技能", md)
 
 
 if __name__ == "__main__":

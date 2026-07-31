@@ -1,5 +1,5 @@
-"""unittest suite for scripts.runners.openai (request building + response
-decoding) and scripts.llm (client selection). No network calls are made."""
+"""scripts.runners.openai（请求构建 + 响应解码）与 scripts.llm（客户端选择）
+的 unittest 测试套件。不发任何网络请求。"""
 
 import json
 import unittest
@@ -79,7 +79,7 @@ class TriggeredByResponseTest(unittest.TestCase):
     def test_malformed_payload_returns_false(self):
         triggered, evidence = triggered_by_response({}, "pdf-processing")
         self.assertFalse(triggered)
-        self.assertIn("malformed", evidence)
+        self.assertIn("响应格式异常", evidence)
 
 
 class OpenAICompatRunnerTest(unittest.TestCase):

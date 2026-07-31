@@ -1,7 +1,7 @@
-"""unittest suite for scripts.improve_description.improve_description.
+"""scripts.improve_description.improve_description 的 unittest 测试套件。
 
-Pure prompt-building + parsing around a pluggable llm_client — mocked here so
-no network/CLI is touched. The llm_client is required (passing None raises).
+纯 prompt 构建 + 解析，围绕可插拔的 llm_client —— 这里用 mock 模拟，
+不接触网络/CLI。llm_client 是必填的（传 None 会抛异常）。
 """
 
 import tempfile

@@ -1,10 +1,10 @@
-"""unittest suite for scripts.utils.prompt_choose_backend.
+"""scripts.utils.prompt_choose_backend 的 unittest 测试套件。
 
-The backend-selection prompt must always hand the decision to the user:
-- candidates are only listed, never auto-picked
-- Enter uses the recommended default
-- typing a name selects it
-- non-interactive stdin (EOFError) raises RuntimeError asking for the flag
+后端选择提示必须始终把决定权交给用户：
+- 候选只列出，绝不自动选中
+- 回车使用推荐默认值
+- 输入名称进行选择
+- 非交互式 stdin（EOFError）抛 RuntimeError，要求传入标志参数
 """
 
 import unittest

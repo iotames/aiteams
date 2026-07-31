@@ -1,14 +1,13 @@
-"""Runner abstraction for skill-trigger evaluation.
+"""技能触发评测的 Runner 抽象。
 
-A Runner drives one model backend (CLI, HTTP API, ...) to answer the
-question: "given a skill's name + description, does this query trigger it?".
+Runner 驱动一个模型后端（CLI、HTTP API……）来回答一个问题：
+"给定技能的 name + description，这条 query 是否触发它？"
 
-Skill injection (how the backend learns about the skill) and trigger
-detection (how the backend's output is interpreted) are encapsulated inside
-each runner, so run_eval.py / run_loop.py stay backend-agnostic.
+技能注入（后端如何获知技能）与触发检测（如何解读后端输出）都封装在
+各 runner 内部，因此 run_eval.py / run_loop.py 保持后端无关。
 
-To support a new model provider, implement this protocol and register it in
-scripts/runners/__init__.py. See references/runners.md for details.
+要支持新的模型提供方，实现本协议并在 scripts/runners/__init__.py 注册。
+详见 references/runners.md。
 """
 
 from dataclasses import dataclass
@@ -17,7 +16,7 @@ from typing import Protocol
 
 @dataclass(frozen=True)
 class SkillContext:
-    """Everything a runner needs to know about the skill under evaluation."""
+    """Runner 需要知道的关于被测技能的一切信息。"""
 
     skill_name: str
     description: str
@@ -25,15 +24,15 @@ class SkillContext:
 
 @dataclass(frozen=True)
 class TriggerResult:
-    """Outcome of running one query against one backend."""
+    """一次 query 对一个后端运行的结果。"""
 
     triggered: bool
-    evidence: str = ""   # human-readable note on how the decision was reached
-    error: str = ""      # non-empty when the run failed (treated as no trigger)
+    evidence: str = ""   # 人类可读的判定依据
+    error: str = ""      # 非空表示本次运行失败（按未触发处理）
 
 
 class Runner(Protocol):
-    """Backend that runs a single query and reports whether the skill triggered."""
+    """运行单条 query 并报告技能是否触发的后端。"""
 
     name: str
 
@@ -45,9 +44,9 @@ class Runner(Protocol):
         timeout: int,
         project_root: str | None = None,
     ) -> TriggerResult:
-        """Run `query` against the skill described by `skill_ctx`.
+        """用 skill_ctx 描述的技能运行 `query`。
 
-        Returns TriggerResult; failures must be reported via `error` rather
-        than raised, so the caller can treat them as non-triggers.
+        返回 TriggerResult；失败必须通过 `error` 报告而不是抛异常，
+        以便调用方统一按未触发处理。
         """
         ...

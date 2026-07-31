@@ -1,17 +1,13 @@
-"""unittest suite for scripts.run_eval.run_eval.
+"""scripts.run_eval.run_eval 的 unittest 测试套件。
 
-Uses a lightweight FakeRunner so no external CLI or network is touched. The
-runner runs inside a ProcessPoolExecutor, so FakeRunner/FakeResult must be
-picklable module-level classes with simple attributes.
+使用轻量级 FakeRunner，不接触外部 CLI 或网络。runner 在
+ThreadPoolExecutor 内执行，因此 FakeRunner 实例在进程内共享。
 
-The FakeRunner triggers iff a keyword appears in BOTH the description and the
-query. `partial=True` (only meaningful with num_workers=1, where the worker is
-reused across runs) triggers on 1 of every 3 calls to simulate a partial rate.
+FakeRunner 仅在关键词同时出现在描述和查询中时触发。`partial=True`
+（仅对 num_workers=1 有意义）使每 3 次调用触发 1 次，模拟部分触发率。
 """
 
 import unittest
-from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import patch
 
 from scripts.run_eval import run_eval
 from scripts.runners.base import SkillContext
@@ -52,16 +48,6 @@ EVAL = [
 
 
 class RunEvalTest(unittest.TestCase):
-    def setUp(self):
-        # run_eval uses ProcessPoolExecutor; substitute a thread pool so the
-        # FakeRunner instance (and its counter) is shared in-process. The two
-        # pools share the submit/future/as_completed API.
-        self._pool_patch = patch("scripts.run_eval.ProcessPoolExecutor", ThreadPoolExecutor)
-        self._pool_patch.start()
-
-    def tearDown(self):
-        self._pool_patch.stop()
-
     def test_all_correct_single_run(self):
         runner = FakeRunner(keywords=["pdf", "xlsx"])
         out = run_eval(
@@ -175,6 +161,23 @@ class RunEvalTest(unittest.TestCase):
         )
         self.assertEqual(out["summary"]["passed"], 0)
         self.assertEqual(out["results"][0]["triggers"], 0)
+
+    def test_query_error_recorded_in_errors_field(self):
+        """失败必须记录 errors，避免与"正确未触发"混淆。"""
+        runner = FakeRunner(keywords=["xlsx"], error_on=["转xlsx"])
+        out = run_eval(
+            eval_set=[{"query": "转xlsx", "should_trigger": True}],
+            skill_ctx=SkillContext(skill_name="demo", description="xlsx"),
+            runner=runner,
+            num_workers=1,
+            timeout=10,
+            runs_per_query=1,
+            trigger_threshold=0.5,
+            model=None,
+        )
+        r = out["results"][0]
+        self.assertEqual(r["errors"], 1)
+        self.assertEqual(r["error_details"], ["boom"])
 
     def test_summary_counts_mixed(self):
         runner = FakeRunner(keywords=["pdf"])

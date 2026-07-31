@@ -1,12 +1,11 @@
-"""Claude Code runner — the original trigger-evaluation backend.
+"""Claude Code runner —— 最早的触发评测后端。
 
-Drives the `claude -p` CLI: the skill is injected by writing a command file
-under `.claude/commands/` (Claude Code's skill discovery mechanism), then the
-query is sent and the `stream-json` output is parsed for `Skill`/`Read`
-tool_use events that reference the injected skill name.
+通过 `claude -p` CLI 驱动：技能通过 `.claude/commands/` 下的命令文件注入
+（Claude Code 的技能发现机制），然后把 query 发出去，并解析 `stream-json`
+输出中的 `Skill`/`Read` tool_use 事件是否引用注入的技能名。
 
-The stream parsing is factored into :class:`ClaudeStreamTriggerParser` as a
-pure, stateful, testable unit — it only consumes lines and returns decisions.
+流解析被拆成 :class:`ClaudeStreamTriggerParser`：一个纯函数、有状态的、
+可测试单元——它只消费行并返回判定。
 """
 
 import json
@@ -22,10 +21,10 @@ from scripts.runners.base import SkillContext, TriggerResult
 
 
 def find_project_root() -> Path:
-    """Find the project root by walking up from cwd looking for .claude/.
+    """从 cwd 向上寻找项目根（找到包含 .claude/ 的目录）。
 
-    Mimics how Claude Code discovers its project root, so the command file
-    we create ends up where claude -p will look for it.
+    模拟 Claude Code 的项目根发现逻辑，确保我们创建的命令文件位于
+    claude -p 会去查找的位置。
     """
     current = Path.cwd()
     for parent in [current, *current.parents]:
@@ -36,18 +35,17 @@ def find_project_root() -> Path:
 
 @dataclass(frozen=True)
 class TriggerDecision:
-    """A settled decision from the stream parser, if any."""
+    """流解析器得出的最终判定（如果有的话）。"""
 
     settled: bool
     triggered: bool
 
 
 class ClaudeStreamTriggerParser:
-    """Stateful parser for `claude -p --output-format stream-json` output.
+    """`claude -p --output-format stream-json` 输出的有状态解析器。
 
-    feed() each stdout line; it returns a TriggerDecision as soon as the
-    stream has settled the outcome, or None to keep parsing. Mirrors the
-    original inline logic of run_eval.py.
+    feed() 每行 stdout 内容；一旦流已经定案就返回 TriggerDecision，否则
+    返回 None 继续解析。复刻了 run_eval.py 原有的内联逻辑。
     """
 
     def __init__(self, clean_name: str):
@@ -118,7 +116,7 @@ class ClaudeStreamTriggerParser:
 
 
 class ClaudeCodeRunner:
-    """Trigger-evaluation backend that drives the `claude -p` CLI."""
+    """驱动 `claude -p` CLI 的触发评测后端。"""
 
     name = "claude-code"
 
@@ -138,7 +136,7 @@ class ClaudeCodeRunner:
 
         try:
             project_commands_dir.mkdir(parents=True, exist_ok=True)
-            # Use YAML block scalar to avoid breaking on quotes in description
+            # 使用 YAML 块标量，避免描述中的引号导致解析出错
             indented_desc = "\n  ".join(skill_ctx.description.split("\n"))
             command_content = (
                 f"---\n"
@@ -160,9 +158,8 @@ class ClaudeCodeRunner:
             if model:
                 cmd.extend(["--model", model])
 
-            # Remove CLAUDECODE env var to allow nesting claude -p inside a
-            # Claude Code session. The guard is for interactive terminal
-            # conflicts; programmatic subprocess usage is safe.
+            # 移除 CLAUDECODE 环境变量，允许在 Claude Code 会话内嵌套
+            # claude -p。该守卫针对交互式终端冲突；编程式子进程调用是安全的。
             env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
 
             process = subprocess.Popen(
@@ -201,31 +198,31 @@ class ClaudeCodeRunner:
                         if decision is not None and decision.settled:
                             return TriggerResult(
                                 triggered=decision.triggered,
-                                evidence=f"stream decision at type={line[:60]!r}",
+                                evidence=f"流事件判定 type={line[:60]!r}",
                             )
             finally:
-                # Clean up process on any exit path (return, exception, timeout)
+                # 任何退出路径（return、异常、超时）都清理进程
                 if process.poll() is None:
                     process.kill()
                     process.wait()
 
             if decision is not None:
-                return TriggerResult(triggered=decision.triggered, evidence="end of stream")
+                return TriggerResult(triggered=decision.triggered, evidence="流结束")
             return TriggerResult(
                 triggered=False,
-                evidence="no decision before timeout/EOF",
+                evidence="超时/EOF 前未得到判定",
                 error="timeout or empty stream",
             )
         except FileNotFoundError as e:
             return TriggerResult(
                 triggered=False,
-                evidence=f"claude CLI not found: {e}",
+                evidence=f"未找到 claude CLI：{e}",
                 error=str(e),
             )
         except Exception as e:
             return TriggerResult(
                 triggered=False,
-                evidence=f"runner error: {e}",
+                evidence=f"runner 错误：{e}",
                 error=str(e),
             )
         finally:

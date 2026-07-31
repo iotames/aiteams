@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Improve a skill description based on eval results.
+"""根据评测结果改进技能描述。
 
-Takes eval results (from run_eval.py) and generates an improved description
-by calling an LLM client (see scripts/llm.py). The default is the Claude Code
-CLI (`claude -p`), which reuses the session's auth — no separate
-ANTHROPIC_API_KEY needed. Use --llm openai for any chat-completions endpoint.
+接收 run_eval.py 的评测结果，调用 LLM 客户端（见 scripts/llm.py）生成改进
+后的描述。默认使用 Claude Code CLI（`claude -p`），复用会话认证——无需单独
+的 ANTHROPIC_API_KEY。使用 --llm openai 可走任意 chat-completions 端点。
 """
 
 import argparse
@@ -29,7 +28,7 @@ def improve_description(
     iteration: int | None = None,
     llm_client=None,
 ) -> str:
-    """Ask the LLM to improve the description based on eval results."""
+    """根据评测结果请 LLM 改进描述。"""
     failed_triggers = [
         r for r in eval_results["results"]
         if r["should_trigger"] and not r["pass"]
@@ -39,7 +38,7 @@ def improve_description(
         if not r["should_trigger"] and not r["pass"]
     ]
 
-    # Build scores summary
+    # 构建分数摘要
     train_score = f"{eval_results['summary']['passed']}/{eval_results['summary']['total']}"
     if test_results:
         test_score = f"{test_results['summary']['passed']}/{test_results['summary']['total']}"
@@ -47,9 +46,9 @@ def improve_description(
     else:
         scores_summary = f"Train: {train_score}"
 
-    prompt = f"""You are optimizing a skill description for a Claude Code skill called "{skill_name}". A "skill" is sort of like a prompt, but with progressive disclosure -- there's a title and description that Claude sees when deciding whether to use the skill, and then if it does use the skill, it reads the .md file which has lots more details and potentially links to other resources in the skill folder like helper files and scripts and additional documentation or examples.
+    prompt = f"""You are optimizing the description of a skill called "{skill_name}" for a coding agent (such as Claude Code, Codex, or another agent harness). A "skill" is sort of like a prompt, but with progressive disclosure -- there's a title and description that the agent sees when deciding whether to use the skill, and then if it does use the skill, it reads the .md file which has lots more details and potentially links to other resources in the skill folder like helper files and scripts and additional documentation or examples.
 
-The description appears in Claude's "available_skills" list. When a user sends a query, Claude decides whether to invoke the skill based solely on the title and on this description. Your goal is to write a description that triggers for relevant queries, and doesn't trigger for irrelevant ones.
+The description appears in the agent's "available_skills" list. When a user sends a query, the agent decides whether to invoke the skill based solely on the title and on this description. Your goal is to write a description that triggers for relevant queries, and doesn't trigger for irrelevant ones.
 
 Here's the current description:
 <current_description>
@@ -105,7 +104,7 @@ Concretely, your description should not be more than about 100-200 words, even i
 Here are some tips that we've found to work well in writing these descriptions:
 - The skill should be phrased in the imperative -- "Use this skill for" rather than "this skill does"
 - The skill description should focus on the user's intent, what they are trying to achieve, vs. the implementation details of how the skill works.
-- The description competes with other skills for Claude's attention — make it distinctive and immediately recognizable.
+- The description competes with other skills for the agent's attention — make it distinctive and immediately recognizable.
 - If you're getting lots of failures after repeated attempts, change things up. Try different sentence structures or wordings.
 
 I'd encourage you to be creative and mix up the style in different iterations since you'll have multiple opportunities to try different approaches and we'll just grab the highest-scoring one at the end. 
@@ -115,8 +114,8 @@ Please respond with only the new description text in <new_description> tags, not
     client = llm_client
     if client is None:
         raise ValueError(
-            "llm_client is required for improve_description() — pass it "
-            "explicitly (the CLI asks the user which backend to use)."
+            "improve_description() 需要 llm_client —— 请显式传入"
+            "（CLI 会询问用户使用哪个后端）。"
         )
     text = client.complete(prompt, model=model)
 
@@ -132,11 +131,10 @@ Please respond with only the new description text in <new_description> tags, not
         "over_limit": len(description) > 1024,
     }
 
-    # Safety net: the prompt already states the 1024-char hard limit, but if
-    # the model blew past it anyway, make one fresh single-turn call that
-    # quotes the too-long version and asks for a shorter rewrite. (The old
-    # SDK path did this as a true multi-turn; `claude -p` is one-shot, so we
-    # inline the prior output into the new prompt instead.)
+    # 安全网：prompt 里已经声明了 1024 字符的硬限制，但如果模型
+    # 还是超了，就再发起一次全新的一次性调用，把过长版本引用进去
+    # 并要求缩短重写。（旧的 SDK 路径是真正的多轮对话；`claude -p`
+    # 是单轮的，所以我们把前一次输出内联到新 prompt 里。）
     if len(description) > 1024:
         shorten_prompt = (
             f"{prompt}\n\n"
@@ -170,20 +168,20 @@ Please respond with only the new description text in <new_description> tags, not
 
 def main():
     ensure_utf8_stdio()
-    parser = argparse.ArgumentParser(description="Improve a skill description based on eval results")
-    parser.add_argument("--eval-results", required=True, help="Path to eval results JSON (from run_eval.py)")
-    parser.add_argument("--skill-path", required=True, help="Path to skill directory")
-    parser.add_argument("--history", default=None, help="Path to history JSON (previous attempts)")
-    parser.add_argument("--model", required=True, help="Model for improvement")
-    parser.add_argument("--llm", default=None, help="LLM backend: claude / openai (未指定时交互询问); see scripts/llm.py")
-    parser.add_argument("--openai-base-url", default=None, help="Base URL for the openai LLM client (default: $OPENAI_BASE_URL or https://api.openai.com/v1)")
-    parser.add_argument("--openai-api-key", default=None, help="API key for the openai LLM client (default: $OPENAI_API_KEY)")
-    parser.add_argument("--verbose", action="store_true", help="Print thinking to stderr")
+    parser = argparse.ArgumentParser(description="根据评测结果改进技能描述")
+    parser.add_argument("--eval-results", required=True, help="评测结果 JSON 路径（来自 run_eval.py）")
+    parser.add_argument("--skill-path", required=True, help="技能目录路径")
+    parser.add_argument("--history", default=None, help="历史 JSON 路径（之前的尝试）")
+    parser.add_argument("--model", required=True, help="改进所用的模型")
+    parser.add_argument("--llm", default=None, help="LLM 后端：claude / openai（未指定时交互询问）；见 scripts/llm.py")
+    parser.add_argument("--openai-base-url", default=None, help="openai LLM 客户端的 Base URL（默认：$OPENAI_BASE_URL 或 https://api.openai.com/v1）")
+    parser.add_argument("--openai-api-key", default=None, help="openai LLM 客户端的 API key（默认：$OPENAI_API_KEY）")
+    parser.add_argument("--verbose", action="store_true", help="向 stderr 打印思考过程")
     args = parser.parse_args()
 
     skill_path = Path(args.skill_path)
     if not (skill_path / "SKILL.md").exists():
-        print(f"Error: No SKILL.md found at {skill_path}", file=sys.stderr)
+        print(f"错误：{skill_path} 下没有 SKILL.md", file=sys.stderr)
         sys.exit(1)
 
     eval_results = json.loads(Path(args.eval_results).read_text(encoding="utf-8"))
@@ -195,8 +193,8 @@ def main():
     current_description = eval_results["description"]
 
     if args.verbose:
-        print(f"Current: {current_description}", file=sys.stderr)
-        print(f"Score: {eval_results['summary']['passed']}/{eval_results['summary']['total']}", file=sys.stderr)
+        print(f"当前：{current_description}", file=sys.stderr)
+        print(f"分数：{eval_results['summary']['passed']}/{eval_results['summary']['total']}", file=sys.stderr)
 
     llm_name = args.llm
     if not llm_name:
@@ -221,9 +219,9 @@ def main():
     )
 
     if args.verbose:
-        print(f"Improved: {new_description}", file=sys.stderr)
+        print(f"改进后：{new_description}", file=sys.stderr)
 
-    # Output as JSON with both the new description and updated history
+    # 输出为 JSON：包含新描述和更新后的历史
     output = {
         "description": new_description,
         "history": history + [{

@@ -1,8 +1,7 @@
-"""unittest suite for scripts.runners.claude_code stream parsing.
+"""scripts.runners.claude_code 流解析的 unittest 测试套件。
 
-Feed synthetic `claude -p --output-format stream-json` lines into
-ClaudeStreamTriggerParser and assert the settled decisions. No subprocess or
-network involved.
+把合成的 `claude -p --output-format stream-json` 行送入
+ClaudeStreamTriggerParser，并断言最终判定。不涉及子进程或网络。
 """
 
 import json

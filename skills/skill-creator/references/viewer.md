@@ -16,20 +16,20 @@ python <skill-creator-path>/eval-viewer/generate_review.py \
 
 - 迭代 2+ 时加 `--previous-workspace <workspace>/iteration-<N-1>`
 - 无图形界面用 `--static <output_path>` 生成静态 HTML 文件（而非启动服务器）
-- 反馈通过 "Submit All Reviews" 保存：服务器模式写入 `feedback.json`，静态模式下载为 `feedback.json` 文件
+- 反馈通过「提交全部审查」按钮保存：服务器模式写入 `feedback.json`，静态模式下载为 `feedback.json` 文件
 
-## Outputs 标签页
+## 「输出」标签页
 
 一个测试用例一屏：
 
-- **Prompt**：给定任务
-- **Output**：技能输出（尽可能内联渲染）
-- **Previous Output**（迭代 2+）：上轮输出的折叠区域
-- **Formal Grades**（有评分时）：断言通过/失败的折叠区域
-- **Feedback**：自动保存的文本框
-- **Previous Feedback**（迭代 2+）：用户上次评论
+- **提示**：给定任务
+- **输出**：技能输出（尽可能内联渲染）
+- **上一轮输出**（迭代 2+）：上轮输出的折叠区域
+- **正式评分**（有评分时）：断言通过/失败的折叠区域
+- **你的反馈**：自动保存的文本框
+- **上一轮反馈**（迭代 2+）：用户上次评论
 
-## Benchmark 标签页
+## 「基准」标签页
 
 - 通过率、耗时、token 按配置（with_skill / baseline）汇总
 - 含每个 eval 的详细分析、均值 ± 标准差、差异值
@@ -37,8 +37,8 @@ python <skill-creator-path>/eval-viewer/generate_review.py \
 
 ## 导航与反馈
 
-- 通过 prev/next 按钮或方向键翻页
-- 点击 "Submit All Reviews" 保存反馈到 `feedback.json`
+- 通过「上一个/下一个」按钮或方向键翻页
+- 点击「提交全部审查」保存反馈到 `feedback.json`
 
 ## 查看 feedback.json
 

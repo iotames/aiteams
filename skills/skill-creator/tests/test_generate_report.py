@@ -1,6 +1,6 @@
-"""unittest suite for scripts.generate_report.generate_html.
+"""scripts.generate_report.generate_html 的 unittest 测试套件。
 
-The report renders run_loop output. Pure function — no network, no subprocess.
+报告渲染 run_loop 的输出。纯函数 —— 无网络、无子进程。
 """
 
 import unittest
@@ -12,7 +12,7 @@ def sample_data():
     return {
         "original_description": "原描述",
         "best_description": "最佳描述",
-        "best_score": "3/5 (train)",
+        "best_score": "3/5",
         "iterations_run": 2,
         "train_size": 5,
         "test_size": 3,
@@ -46,11 +46,11 @@ class GenerateHtmlTest(unittest.TestCase):
     def test_empty_data_renders_basic_page(self):
         out = generate_html({})
         self.assertIn("<!DOCTYPE html>", out)
-        self.assertIn("Skill Description Optimization", out)
+        self.assertIn("技能描述优化", out)
 
     def test_skill_name_in_title(self):
         out = generate_html({}, skill_name="my-skill")
-        self.assertIn("<title>my-skill — Skill Description Optimization</title>", out)
+        self.assertIn("<title>my-skill — 技能描述优化</title>", out)
 
     def test_skill_name_is_escaped(self):
         out = generate_html({}, skill_name="<script>alert(1)</script>")
@@ -66,7 +66,8 @@ class GenerateHtmlTest(unittest.TestCase):
         out = generate_html(sample_data())
         self.assertIn("原描述", out)
         self.assertIn("最佳描述", out)
-        self.assertIn("3/5 (train)", out)
+        self.assertIn("3/5", out)
+        self.assertIn("（训练）", out)
 
     def test_history_rows_and_query_columns(self):
         out = generate_html(sample_data())

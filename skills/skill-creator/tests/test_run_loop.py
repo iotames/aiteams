@@ -1,8 +1,8 @@
-"""unittest suite for scripts.run_loop.
+"""scripts.run_loop 的 unittest 测试套件。
 
-split_eval_set is pure; run_loop end-to-end uses the same fake-runner approach
-as test_run_eval (ProcessPoolExecutor -> ThreadPoolExecutor) plus a FakeLLM, so
-no network/CLI is touched.
+split_eval_set 是纯函数；run_loop 端到端测试使用与 test_run_eval 相同的
+fake-runner 方案（ProcessPoolExecutor -> ThreadPoolExecutor）加 FakeLLM，
+不接触网络或 CLI。
 """
 
 import json
@@ -251,6 +251,37 @@ class RunLoopTest(unittest.TestCase):
         # holdout split is deterministic
         self.assertEqual(out["train_size"] + out["test_size"], 4)
 
+    def test_loop_errors_on_empty_train_set(self):
+        """holdout 过大会把 train 拆成空集，必须显式报错而非静默通过。"""
+        skill = make_skill(self.root)
+        # 2 条 eval + holdout=0.4 → train 为空
+        tiny = [
+            {"query": "做一个PDF", "should_trigger": True},
+            {"query": "写一封邮件", "should_trigger": False},
+        ]
+        fake = self.fake_run_eval
+        fake.side_effect = self._fake_run_eval(
+            {"做一个PDF": 0.0, "写一封邮件": 0.0}
+        )
+        llm = FakeLLM(["<new_description>x</new_description>"])
+
+        with self.assertRaisesRegex(ValueError, "train 集为空"):
+            run_loop(
+                eval_set=tiny,
+                skill_path=skill,
+                description_override="初始描述",
+                num_workers=2,
+                timeout=10,
+                max_iterations=2,
+                runs_per_query=1,
+                trigger_threshold=0.5,
+                holdout=0.4,
+                model="test-model",
+                verbose=False,
+                llm_client=llm,
+                runner=FakeRunner(keywords=[]),
+            )
+
     def test_original_description_reported(self):
         skill = make_skill(self.root)
         fake = self.fake_run_eval
@@ -302,7 +333,7 @@ class RunLoopTest(unittest.TestCase):
         )
         self.assertTrue(report_path.exists())
         content = report_path.read_text(encoding="utf-8")
-        self.assertIn("Skill Description Optimization", content)
+        self.assertIn("技能描述优化", content)
         self.assertIn("auto", content)
 
 

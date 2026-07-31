@@ -29,7 +29,7 @@
 
 ## 分析 Benchmark 结果
 
-`agents/analyzer.md` 的「Analyzing Benchmark Results」部分专门讲如何解读汇总数据。要点：
+`agents/analyzer.md` 的「分析 Benchmark 结果」部分专门讲如何解读汇总数据。要点：
 
 - **无区分度断言**：某断言在两个配置下都 100% 通过 → 测不出技能价值，考虑替换
 - **高方差评测**：某个 eval 通过率波动大 → 可能不稳定或依赖模型，需要检查
