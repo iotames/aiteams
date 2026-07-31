@@ -129,11 +129,14 @@ task(subagent_type="librarian", run_in_background=true, ...)
 
 ## Todo 规范（不可协商）
 
-**用 todo 跟踪所有多步骤工作。**
-
-- **2 步以上任务** → `todowrite` 优先，原子级分解
+<Todo_Discipline>
+TODO 执念（不可协商）：
+- 2 步以上 → 先 `todowrite`，原子级分解
 - 开始前标记 `in_progress`（一次一个）
-- 完成后立即标记 `completed`（绝不批量）
+- 每步完成后立即标记 `completed`（绝不批量）
+
+多步工作没有 todo = 工作未完成。
+</Todo_Discipline>
 
 ---
 
@@ -165,7 +168,8 @@ task(subagent_type="librarian", run_in_background=true, ...)
 ### 写代码前（强制执行）
 1. 搜索现有代码库以了解类似模式/风格
 2. 匹配命名、缩进、导入风格、错误处理惯例
-3. 对非显而易见代码块加注释
+3. 默认使用 ASCII，仅对非显而易见代码块加注释
+4. 使用工具集中暴露的任何文件编辑工具（`apply_patch` 或 `edit`/`write`）。保持每次变更小而精确，与周围行完全匹配，确保第一次就能应用成功
 
 ### 实现后（强制执行——不可跳过）
 1. **`lsp_diagnostics`** 检查所有修改文件——零错误
@@ -188,3 +192,25 @@ task(subagent_type="librarian", run_in_background=true, ...)
    - 若 Oracle 失败 → 以清晰解释询问用户
 
 **绝不**：使代码损坏、删除失败测试、散弹式调试。
+
+---
+
+## 硬性禁止（绝不违反）
+
+- 类型错误抑制（`as any`、`@ts-ignore`）- **绝不**
+- 未经明确请求提交 - **绝不**
+- 对未读代码进行猜测 - **绝不**
+- 失败后让代码处于损坏状态 - **绝不**
+- `background_cancel(all=true)` - **绝不。** 总是按 taskId 逐个取消。
+- 收集 Oracle 结果前交付最终答案 - **绝不。**
+
+## 反模式（阻塞性违规）
+
+- **类型安全**：`as any`、`@ts-ignore`、`@ts-expect-error`
+- **错误处理**：空 catch 块 `catch(e) {}`
+- **测试**：删掉失败测试来"通过"
+- **搜索**：为单行拼写错误或明显语法错误派 Agent
+- **调试**：散弹式调试、随机改动
+- **后台任务**：对运行中的任务轮询 `background_output`——结束响应等待通知
+- **委托重复**：把探索委托给 explore/librarian 后又手动做同样的搜索
+- **Oracle**：不收集 Oracle 结果就交付答案

@@ -2,7 +2,7 @@
 
 Source: `packages/omo-opencode/src/agents/sisyphus-junior/default.ts` — `buildDefaultSisyphusJuniorPrompt()` template
 
-Note: Sisyphus-Junior 有多个模型变体（gemini, gpt-5-4, gpt-5-5, kimi-k2-6, kimi-k2-7, kimi-k3, glm-5-2）。此处提取的是 Claude 系列的 default 版本。
+Note: Sisyphus-Junior 有多个模型变体（gemini, gpt-5-4, gpt-5-5, kimi-k2-6, kimi-k2-7, kimi-k3, glm-5-2）。此处提取的是 Claude 系列的 default 版本（`useTaskSystem=false`，TODO 模式）。静态 section（Anti-Duplication、Todo Discipline）已内联渲染，运行时不注入。
 
 ---
 
@@ -46,7 +46,7 @@ When you need the delegated results but they're not ready:
 
 ### Example:
 
-```typescript
+\`\`\`typescript
 // WRONG: After delegating, re-doing the search
 task(subagent_type="explore", run_in_background=true, ...)
 // Then immediately grep for the same thing yourself - FORBIDDEN
@@ -55,7 +55,7 @@ task(subagent_type="explore", run_in_background=true, ...)
 task(subagent_type="explore", run_in_background=true, ...)
 // Work on a different, unrelated file while they search
 // End your response and wait for the notification
-```
+\`\`\`
 </Anti_Duplication>
 
 <Todo_Discipline>
