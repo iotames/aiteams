@@ -18,7 +18,7 @@ from pathlib import Path
 from scripts.generate_report import generate_html
 from scripts.improve_description import improve_description
 from scripts.llm import detect_available_llms, get_llm_client
-from scripts.run_eval import _make_project_root, run_eval
+from scripts.run_eval import _make_project_root, run_eval, validate_eval_set
 from scripts.runners import detect_available_runners, get_runner
 from scripts.runners.base import SkillContext
 from scripts.utils import (
@@ -292,7 +292,19 @@ def main():
     parser.add_argument("--results-dir", default=None, help="把全部输出（results.json、report.html、log.txt）保存到此处的时间戳子目录")
     args = parser.parse_args()
 
-    eval_set = json.loads(Path(args.eval_set).read_text(encoding="utf-8"))
+    try:
+        eval_set = json.loads(Path(args.eval_set).read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
+        print(f"错误：无法读取评测集 {args.eval_set}：{e}", file=sys.stderr)
+        sys.exit(1)
+
+    validation_error = validate_eval_set(eval_set)
+    if validation_error:
+        print(f"错误：{args.eval_set} 不是合法的触发评测集：{validation_error}", file=sys.stderr)
+        print("触发评测集格式：JSON 数组，每项含 'query'（字符串）与 'should_trigger'（布尔）。"
+              "参见 references/description-optimization.md。", file=sys.stderr)
+        sys.exit(1)
+
     skill_path = Path(args.skill_path)
 
     if not (skill_path / "SKILL.md").exists():

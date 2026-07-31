@@ -7,7 +7,7 @@ description: >-
   也适用于用户询问"怎么写 SKILL.md"、"技能应该包含什么内容"。
 license: Apache-2.0
 metadata:
-  version: "2.2.0"
+  version: "2.2.1"
 allowed-tools: Read Write Edit Bash Glob Grep Task Fleet ReadFile ReadSkill RunSkill WebFetch Research Review
 ---
 
@@ -50,6 +50,10 @@ SKILL.md 是写给 AI 模型看的**使用说明书**，不是技术实现文档
 > 本工具链自身已遵循此约定：脚本注释、CLI 输出、评测报告、HTML 查看器均为简体中文。
 
 > 依赖声明约定：新技能的依赖**不强制** requirements.txt —— 依赖什么语言就声明什么，写在 frontmatter 的 `compatibility` 字段（≤500 字符，如 `Requires Python 3.14+ and uv`）或 SKILL.md 正文「环境要求」节。requirements.txt 仅用于本技能（skill-creator）自身工具链的运行时依赖。
+
+### 版本化管理
+
+版本号写在 frontmatter `metadata.version`，语义化 `MAJOR.MINOR.PATCH`（破坏性 / 新增功能 / 修复）。每次实质变更即 bump，不攒批；与 pyproject.toml 的 `[project] version` 保持同步。
 
 ### 不挑刺原则
 
@@ -115,6 +119,7 @@ SKILL.md 是写给 AI 模型看的**使用说明书**，不是技术实现文档
 - **allowed-tools**（可选）：空格分隔的预授权工具字符串，如 `allowed-tools: Read Write Bash(git:*)`。规范要求是字符串而非 YAML 列表。**注意**：工具名与具体运行环境相关，其他 harness 可忽略或替换
 - **license**（可选）：开源许可证名或指向打包 LICENSE 文件的引用
 - **compatibility**（可选）：环境要求，最长 500 字符（如 `Requires Python 3.14+ and uv`）
+- **metadata**（可选）：结构化元数据，如 `version`（语义化版本号，见「版本化管理」）
 - 正文：按上述内容原则组织
 
 **起草完成后，必须运行验证**：

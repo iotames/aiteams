@@ -107,6 +107,38 @@ def run_eval(
     }
 
 
+def validate_eval_set(eval_set: object) -> str | None:
+    """校验触发评测集结构，返回错误描述（合法返回 None）。
+
+    触发评测集是 JSON 数组，每项含 'query'（非空字符串）与
+    'should_trigger'（布尔）。注意这不是 evals/evals.json 的格式
+    （后者含 skill_name/id/prompt，是技能评测用例）；两套 schema 容易
+    混淆，误传时给出明确提示。
+    """
+    if isinstance(eval_set, dict) and "skill_name" in eval_set:
+        return (
+            "这是 evals/evals.json 的格式（含 'skill_name' 字段），"
+            "不是触发评测集。触发评测集是 JSON 数组，每项含 "
+            "'query'（字符串）与 'should_trigger'（布尔）。"
+        )
+    if not isinstance(eval_set, list):
+        return "必须是 JSON 数组"
+    if not eval_set:
+        return "数组不能为空"
+    for i, item in enumerate(eval_set):
+        if not isinstance(item, dict):
+            return f"第 {i} 项必须是对象"
+        if "query" not in item:
+            return f"第 {i} 项缺少 'query' 字段"
+        if not isinstance(item["query"], str) or not item["query"].strip():
+            return f"第 {i} 项的 'query' 必须是非空字符串"
+        if "should_trigger" not in item:
+            return f"第 {i} 项缺少 'should_trigger' 字段"
+        if not isinstance(item["should_trigger"], bool):
+            return f"第 {i} 项的 'should_trigger' 必须是布尔值"
+    return None
+
+
 def _make_project_root(arg: str | None) -> Path:
     """返回要交给 runner 的 project_root。
 
@@ -140,7 +172,19 @@ def main():
     parser.add_argument("--verbose", action="store_true", help="向 stderr 打印进度")
     args = parser.parse_args()
 
-    eval_set = json.loads(Path(args.eval_set).read_text(encoding="utf-8"))
+    try:
+        eval_set = json.loads(Path(args.eval_set).read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
+        print(f"错误：无法读取评测集 {args.eval_set}：{e}", file=sys.stderr)
+        sys.exit(1)
+
+    validation_error = validate_eval_set(eval_set)
+    if validation_error:
+        print(f"错误：{args.eval_set} 不是合法的触发评测集：{validation_error}", file=sys.stderr)
+        print("触发评测集格式：JSON 数组，每项含 'query'（字符串）与 'should_trigger'（布尔）。"
+              "参见 references/description-optimization.md。", file=sys.stderr)
+        sys.exit(1)
+
     skill_path = Path(args.skill_path)
 
     if not (skill_path / "SKILL.md").exists():

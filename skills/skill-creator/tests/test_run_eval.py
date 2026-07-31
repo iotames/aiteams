@@ -9,7 +9,7 @@ FakeRunner 仅在关键词同时出现在描述和查询中时触发。`partial=
 
 import unittest
 
-from scripts.run_eval import run_eval
+from scripts.run_eval import run_eval, validate_eval_set
 from scripts.runners.base import SkillContext
 
 
@@ -239,6 +239,52 @@ class RunEvalTest(unittest.TestCase):
             [r["query"] for r in out["results"]],
             [item["query"] for item in EVAL],
         )
+
+
+class ValidateEvalSetTest(unittest.TestCase):
+    def test_valid_list_passes(self):
+        self.assertIsNone(validate_eval_set([
+            {"query": "做一个PDF", "should_trigger": True},
+            {"query": "写一封邮件", "should_trigger": False},
+        ]))
+
+    def test_rejects_non_list(self):
+        self.assertIsNotNone(validate_eval_set({}))
+        self.assertIsNotNone(validate_eval_set("x"))
+
+    def test_rejects_empty_list(self):
+        self.assertIsNotNone(validate_eval_set([]))
+
+    def test_rejects_non_dict_item(self):
+        err = validate_eval_set([["query"]])
+        self.assertIn("对象", err)
+
+    def test_rejects_missing_query(self):
+        err = validate_eval_set([{"should_trigger": True}])
+        self.assertIn("query", err)
+
+    def test_rejects_non_string_query(self):
+        err = validate_eval_set([{"query": 123, "should_trigger": True}])
+        self.assertIn("query", err)
+
+    def test_rejects_blank_query(self):
+        err = validate_eval_set([{"query": "  ", "should_trigger": True}])
+        self.assertIn("query", err)
+
+    def test_rejects_missing_should_trigger(self):
+        err = validate_eval_set([{"query": "q"}])
+        self.assertIn("should_trigger", err)
+
+    def test_rejects_non_bool_should_trigger(self):
+        err = validate_eval_set([{"query": "q", "should_trigger": "yes"}])
+        self.assertIn("should_trigger", err)
+
+    def test_evals_json_gets_specific_hint(self):
+        """误传 evals/evals.json（含 skill_name）时给出针对性提示。"""
+        err = validate_eval_set({"skill_name": "demo", "evals": []})
+        self.assertIsNotNone(err)
+        self.assertIn("skill_name", err)
+        self.assertIn("evals/evals.json", err)
 
 
 if __name__ == "__main__":
