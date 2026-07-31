@@ -5,21 +5,10 @@ description: >-
   当用户想从零创建技能、编辑优化已有技能、运行测试评测、做基准对比（含方差分析）、
   或优化技能描述以提高触发准确率时使用。
   也适用于用户询问"怎么写 SKILL.md"、"技能应该包含什么内容"。
-allowed-tools:
-  - Read
-  - Write
-  - Edit
-  - Bash
-  - Glob
-  - Grep
-  - Task
-  - Fleet
-  - ReadFile
-  - ReadSkill
-  - RunSkill
-  - WebFetch
-  - Research
-  - Review
+license: Apache-2.0
+metadata:
+  version: "2.0.0"
+allowed-tools: Read Write Edit Bash Glob Grep Task Fleet ReadFile ReadSkill RunSkill WebFetch Research Review
 ---
 
 # Skill Creator — 技能创建与优化
@@ -42,6 +31,8 @@ SKILL.md 是写给 AI 模型看的**使用说明书**，不是技术实现文档
 | 实现细节 | 代码内部逻辑、搜索路径、兜底机制等放在代码注释中 |
 
 **关键原则：** 告诉模型「怎么用」，或者「调用的示例代码」，而不是告诉模型「技能代码和原理」。
+
+> 依赖声明约定：新技能的依赖**不强制** requirements.txt —— 依赖什么语言就声明什么，写在 frontmatter 的 `compatibility` 字段（≤500 字符，如 `Requires Python 3.14+ and uv`）或 SKILL.md 正文「环境要求」节。requirements.txt 仅用于本技能（skill-creator）自身工具链的运行时依赖（见 `requirements.txt`）。
 
 ---
 
@@ -78,9 +69,19 @@ SKILL.md 是写给 AI 模型看的**使用说明书**，不是技术实现文档
 
 根据用户调研，填充以下内容：
 
-- **name**：技能标识符，小写字母加连字符
-- **description**：触发机制的核心。写清楚技能做什么以及具体的触发场景。当前 AI 模型有"触发不足"的倾向——需要时却不使用技能。为此让描述稍微"强势"一点。例如不要写"如何构建简单仪表盘"，而是写"当用户提到仪表盘、数据可视化、内部指标时务必使用此技能，即使没有明确说'dashboard'一词"
+- **name**：技能标识符，小写字母加连字符，**必须与技能目录名一致**（规范要求），最长 64 字符
+- **description**：触发机制的核心。写清楚技能做什么以及具体的触发场景，最长 1024 字符。当前 AI 模型有"触发不足"的倾向——需要时却不使用技能。为此让描述稍微"强势"一点。例如不要写"如何构建简单仪表盘"，而是写"当用户提到仪表盘、数据可视化、内部指标时务必使用此技能，即使没有明确说'dashboard'一词"
+- **allowed-tools**（可选）：空格分隔的预授权工具字符串，如 `allowed-tools: Read Write Bash(git:*)`。规范要求是字符串而非 YAML 列表
+- **license**（可选）：开源许可证名或指向打包 LICENSE 文件的引用
 - 正文：按上述内容原则组织
+
+**起草完成后，必须运行验证**：
+
+```bash
+python -m scripts.quick_validate <skill-path>
+```
+
+验证不通过（如 name 与目录名不符、description 为空或超长、frontmatter 含非法字段）则修正后重新验证，通过后才可进入测试用例环节。
 
 #### 技能目录结构
 
@@ -145,7 +146,9 @@ cloud-deploy/
 }
 ```
 
-完整 schema 见 `references/schemas.md`（含 `assertions` 字段，下一步添加）。
+完整 schema 见 `references/schemas.md`（含 `expectations` 字段，下一步添加）。
+
+**evals.json 受 `quick_validate` 强制校验**：`skill_name` 必须与 frontmatter `name` 一致，每条 eval 必须含 `id`/`prompt`/`expected_output`，`files`/`expectations` 必须为字符串列表；schema 之外的字段（如 `name`/`steps`）会产生警告。字段缺失或不一致时验证不通过，禁止进入评测。
 
 ---
 
@@ -173,14 +176,14 @@ cloud-deploy/
 - **创建新技能**：不带任何技能，保存到 `without_skill/outputs/`
 - **优化已有技能**：编辑前快照（`cp -r <skill-path> <workspace>/skill-snapshot/`），基准指向快照，保存到 `old_skill/outputs/`
 
-每个测试用例写 `eval_metadata.json`（断言暂空），用描述性名称而非 `eval-0`：
+每个测试用例写 `eval_metadata.json`（expectations 暂空），用描述性名称而非 `eval-0`：
 
 ```json
 {
   "eval_id": 0,
   "eval_name": "描述性名称",
   "prompt": "测试 prompt",
-  "assertions": []
+  "expectations": []
 }
 ```
 
@@ -220,14 +223,12 @@ cloud-deploy/
 
 4. **启动查看器**：
    ```bash
-   nohup python <skill-creator-path>/eval-viewer/generate_review.py \
+   python <skill-creator-path>/eval-viewer/generate_review.py \
      <workspace>/iteration-N \
      --skill-name "my-skill" \
-     --benchmark <workspace>/iteration-N/benchmark.json \
-     > /dev/null 2>&1 &
-   VIEWER_PID=$!
+     --benchmark <workspace>/iteration-N/benchmark.json
    ```
-   迭代 2+ 时加 `--previous-workspace`。无图形界面用 `--static <output_path>` 生成 HTML 文件。
+   迭代 2+ 时加 `--previous-workspace`。无图形界面用 `--static <output_path>` 生成静态 HTML 文件。
 
 5. **告知用户**："结果已打开。'Outputs' 标签页查看输出并留反馈，'Benchmark' 展示定量对比。"
 
@@ -257,7 +258,7 @@ cloud-deploy/
 }
 ```
 
-空反馈表示没问题，专注于有具体意见的测试用例改进。完成后关闭查看器：`kill $VIEWER_PID 2>/dev/null`。
+空反馈表示没问题，专注于有具体意见的测试用例改进。完成后关闭查看器（Ctrl+C 或关闭终端）。
 
 ---
 
@@ -294,6 +295,10 @@ cloud-deploy/
 ## 四、描述优化
 
 description 字段是触发机制的核心。技能内容完善后，可优化描述提高触发准确率。
+
+> **评测与技能的边界（核心原则）**：**技能本体（SKILL.md + scripts）保持模型无关、纯通用格式**——它是写给任何智能体的 Markdown 指令 + 纯代码，不包含"如果模型是 X 就怎样"的逻辑，不主动适配大模型个性化。`--runner` 只是**评测试金石**：评测"触发率"需要一个真实智能体来执行查询并决定是否激活技能，runner 选的正是这个试金石，与技能本体无关。若未来新智能体有专属注入机制，适配写进新 runner，技能文件一行不改。
+>
+> **后端选择：询问用户，绝不自动决定**。检测只负责**列出候选**（本机是否有 `claude` CLI、是否设置 `OPENAI_API_KEY`），具体用哪个**必须由你确认**：CLI 会交互提示候选并让你输入，直接回车使用推荐项。注意"检测到 claude CLI"只代表 PATH 中存在该命令，**不代表可用**——一切以你的确认为准。非交互环境（无 stdin）会报错，要求显式传 `--runner` / `--llm`，不会自作主张。
 
 ### 第 1 步：生成触发评测查询
 
@@ -340,8 +345,18 @@ python -m scripts.run_loop \
 ## 五、打包
 
 ```bash
-python -m scripts.package_skill <path/to/skill-folder>
+python -m scripts.package_skill <path/to/skill-folder> --output <output-dir>
 ```
+
+打包前 `package_skill` 会自动运行 `quick_validate`，验证失败则中止打包。
+
+如环境可用，建议用官方参考实现做最终校验（比自研验证器更严格、跟随规范演进）：
+
+```bash
+skills-ref validate <path/to/skill-folder>
+```
+
+（`skills-ref` 是 agentskills.io 官方发布的验证工具；本机没有时跳过，以 `quick_validate` 为准。）
 
 打包后交付 `.skill` 文件供安装。保留原名（如原技能是 `research-helper`，输出 `research-helper.skill`）。先复制到可写位置再编辑。
 
@@ -355,30 +370,40 @@ python -m scripts.package_skill <path/to/skill-folder>
 - `agents/comparator.md` — 盲比 A/B 比较
 - `agents/analyzer.md` — 分析 benchmark 结果
 - `references/schemas.md` — 各 JSON 结构定义
+- `references/runners.md` — 评测后端可插拔架构与扩展指南
 - `assets/eval_review.html` — 评测查询审查模板
 - `eval-viewer/generate_review.py` — 评测查看器生成脚本
 
 ## 脚本
 
 ```bash
-# 汇总 benchmark
-python scripts/aggregate_benchmark.py <workspace>/iteration-N --skill-name <name>
+# 汇总 benchmark（须在技能根目录下运行）
+python -m scripts.aggregate_benchmark <workspace>/iteration-N --skill-name <name>
 
 # 生成评测报告
-python scripts/generate_report.py
+python -m scripts.generate_report <results.json> -o report.html
 
 # 优化技能描述
-python scripts/improve_description.py <skill-path>/SKILL.md
+python -m scripts.improve_description --eval-results <eval-results.json> --skill-path <skill-path> --model <model>
 
 # 打包技能
-python scripts/package_skill.py <skill-path> --output <output-dir>
+python -m scripts.package_skill <skill-path> --output <output-dir>
 
 # 快速验证
-python scripts/quick_validate.py
+python -m scripts.quick_validate <skill-path>
 
 # 运行单次评测
-python scripts/run_eval.py
+python -m scripts.run_eval --eval-set <eval-set.json> --skill-path <skill-path>
 
 # 运行优化循环
-python scripts/run_loop.py
+python -m scripts.run_loop --eval-set <eval-set.json> --skill-path <skill-path> --model <model>
+
+# 用 OpenAI 兼容端点评测 + 改进（runner 与 llm 可分别指定）
+python -m scripts.run_loop --eval-set <eval-set.json> --skill-path <skill-path> \
+  --runner openai --llm openai --model gpt-4o-mini \
+  --openai-base-url <base-url> --openai-api-key <key>
 ```
+
+> 注意：所有 `python -m scripts.*` 命令须从 `skill-creator` 技能根目录（含 `scripts/` 目录的层级）运行。
+> 依赖：先 `pip install -r requirements.txt`（仅 PyYAML）。
+> 测试：`python -m unittest discover -s tests`（无需额外安装）。

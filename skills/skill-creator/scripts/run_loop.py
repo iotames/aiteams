@@ -17,8 +17,11 @@ from pathlib import Path
 
 from scripts.generate_report import generate_html
 from scripts.improve_description import improve_description
-from scripts.run_eval import find_project_root, run_eval
-from scripts.utils import parse_skill_md
+from scripts.llm import get_llm_client, detect_available_llms
+from scripts.runners import get_runner, detect_available_runners
+from scripts.runners.base import SkillContext
+from scripts.run_eval import run_eval
+from scripts.utils import ensure_utf8_stdio, parse_skill_md, prompt_choose_backend
 
 
 def split_eval_set(eval_set: list[dict], holdout: float, seed: int = 42) -> tuple[list[dict], list[dict]]:
@@ -58,9 +61,10 @@ def run_loop(
     verbose: bool,
     live_report_path: Path | None = None,
     log_dir: Path | None = None,
+    runner=None,
+    llm_client=None,
 ) -> dict:
     """Run the eval + improvement loop."""
-    project_root = find_project_root()
     name, original_description, content = parse_skill_md(skill_path)
     current_description = description_override or original_description
 
@@ -88,11 +92,11 @@ def run_loop(
         t0 = time.time()
         all_results = run_eval(
             eval_set=all_queries,
-            skill_name=name,
-            description=current_description,
+            skill_ctx=SkillContext(skill_name=name, description=current_description),
+            runner=runner,
             num_workers=num_workers,
             timeout=timeout,
-            project_root=project_root,
+            project_root=None,
             runs_per_query=runs_per_query,
             trigger_threshold=trigger_threshold,
             model=model,
@@ -148,7 +152,7 @@ def run_loop(
                 "test_size": len(test_set),
                 "history": history,
             }
-            live_report_path.write_text(generate_html(partial_output, auto_refresh=True, skill_name=name))
+            live_report_path.write_text(generate_html(partial_output, auto_refresh=True, skill_name=name), encoding="utf-8")
 
         if verbose:
             def print_eval_stats(label, results, elapsed):
@@ -205,6 +209,7 @@ def run_loop(
             model=model,
             log_dir=log_dir,
             iteration=iteration,
+            llm_client=llm_client,
         )
         improve_elapsed = time.time() - t0
 
@@ -242,6 +247,7 @@ def run_loop(
 
 
 def main():
+    ensure_utf8_stdio()
     parser = argparse.ArgumentParser(description="Run eval + improve loop")
     parser.add_argument("--eval-set", required=True, help="Path to eval set JSON file")
     parser.add_argument("--skill-path", required=True, help="Path to skill directory")
@@ -253,12 +259,16 @@ def main():
     parser.add_argument("--trigger-threshold", type=float, default=0.5, help="Trigger rate threshold")
     parser.add_argument("--holdout", type=float, default=0.4, help="Fraction of eval set to hold out for testing (0 to disable)")
     parser.add_argument("--model", required=True, help="Model for improvement")
+    parser.add_argument("--runner", default=None, help="Evaluation backend: claude-code / openai (未指定时交互询问); see scripts/runners/")
+    parser.add_argument("--llm", default=None, help="LLM backend for description improvement: claude / openai (未指定时交互询问); see scripts/llm.py")
+    parser.add_argument("--openai-base-url", default=None, help="Base URL for the openai runner/LLM client (default: $OPENAI_BASE_URL)")
+    parser.add_argument("--openai-api-key", default=None, help="API key for the openai runner/LLM client (default: $OPENAI_API_KEY)")
     parser.add_argument("--verbose", action="store_true", help="Print progress to stderr")
     parser.add_argument("--report", default="auto", help="Generate HTML report at this path (default: 'auto' for temp file, 'none' to disable)")
     parser.add_argument("--results-dir", default=None, help="Save all outputs (results.json, report.html, log.txt) to a timestamped subdirectory here")
     args = parser.parse_args()
 
-    eval_set = json.loads(Path(args.eval_set).read_text())
+    eval_set = json.loads(Path(args.eval_set).read_text(encoding="utf-8"))
     skill_path = Path(args.skill_path)
 
     if not (skill_path / "SKILL.md").exists():
@@ -275,7 +285,7 @@ def main():
         else:
             live_report_path = Path(args.report)
         # Open the report immediately so the user can watch
-        live_report_path.write_text("<html><body><h1>Starting optimization loop...</h1><meta http-equiv='refresh' content='5'></body></html>")
+        live_report_path.write_text("<html><body><h1>Starting optimization loop...</h1><meta http-equiv='refresh' content='5'></body></html>", encoding="utf-8")
         webbrowser.open(str(live_report_path))
     else:
         live_report_path = None
@@ -289,6 +299,21 @@ def main():
         results_dir = None
 
     log_dir = results_dir / "logs" if results_dir else None
+
+    runner_name = args.runner
+    if not runner_name:
+        runner_name = prompt_choose_backend(
+            kind="评测后端 (runner)",
+            candidates=detect_available_runners(),
+            flag="--runner",
+        )
+    llm_name = args.llm
+    if not llm_name:
+        llm_name = prompt_choose_backend(
+            kind="描述改进模型 (llm)",
+            candidates=detect_available_llms(),
+            flag="--llm",
+        )
 
     output = run_loop(
         eval_set=eval_set,
@@ -304,21 +329,31 @@ def main():
         verbose=args.verbose,
         live_report_path=live_report_path,
         log_dir=log_dir,
+        runner=get_runner(
+            runner_name,
+            base_url=args.openai_base_url,
+            api_key=args.openai_api_key,
+        ),
+        llm_client=get_llm_client(
+            llm_name,
+            base_url=args.openai_base_url,
+            api_key=args.openai_api_key,
+        ),
     )
 
     # Save JSON output
     json_output = json.dumps(output, indent=2)
     print(json_output)
     if results_dir:
-        (results_dir / "results.json").write_text(json_output)
+        (results_dir / "results.json").write_text(json_output, encoding="utf-8")
 
     # Write final HTML report (without auto-refresh)
     if live_report_path:
-        live_report_path.write_text(generate_html(output, auto_refresh=False, skill_name=name))
+        live_report_path.write_text(generate_html(output, auto_refresh=False, skill_name=name), encoding="utf-8")
         print(f"\nReport: {live_report_path}", file=sys.stderr)
 
     if results_dir and live_report_path:
-        (results_dir / "report.html").write_text(generate_html(output, auto_refresh=False, skill_name=name))
+        (results_dir / "report.html").write_text(generate_html(output, auto_refresh=False, skill_name=name), encoding="utf-8")
 
     if results_dir:
         print(f"Results saved to: {results_dir}", file=sys.stderr)
