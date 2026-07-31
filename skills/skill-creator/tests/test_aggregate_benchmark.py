@@ -5,7 +5,6 @@ generate_benchmark 与 generate_markdown。纯函数 —— 无网络、无子�
 """
 
 import json
-import math
 import tempfile
 import unittest
 from pathlib import Path

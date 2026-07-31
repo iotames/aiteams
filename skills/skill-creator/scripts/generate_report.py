@@ -44,7 +44,6 @@ def score_class(correct: int, total: int) -> str:
 def generate_html(data: dict, auto_refresh: bool = False, skill_name: str = "") -> str:
     """根据循环输出数据生成 HTML 报告。auto_refresh 为 True 时添加 meta refresh 标签。"""
     history = data.get("history", [])
-    holdout = data.get("holdout", 0)
     title_prefix = html.escape(skill_name + " \u2014 ") if skill_name else ""
 
     # 收集训练集和测试集的所有唯一查询，附带 should_trigger 信息
@@ -179,7 +178,6 @@ def generate_html(data: dict, auto_refresh: bool = False, skill_name: str = "") 
 
     # 汇总区块
     best_test_score = data.get('best_test_score')
-    best_train_score = data.get('best_train_score')
     html_parts.append(f"""
     <div class="summary">
         <p><strong>原始描述：</strong> {html.escape(data.get('original_description', 'N/A'))}</p>
@@ -239,10 +237,6 @@ def generate_html(data: dict, auto_refresh: bool = False, skill_name: str = "") 
     # 为每次迭代添加行
     for h in history:
         iteration = h.get("iteration", "?")
-        train_passed = h.get("train_passed", h.get("passed", 0))
-        train_total = h.get("train_total", h.get("total", 0))
-        test_passed = h.get("test_passed")
-        test_total = h.get("test_total")
         description = h.get("description", "")
         train_results = h.get("train_results", h.get("results", [])) or []
         test_results = h.get("test_results") or []

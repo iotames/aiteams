@@ -17,7 +17,6 @@ from pathlib import Path
 _VIEWER_DIR = Path(__file__).resolve().parents[1] / "eval-viewer"
 sys.path.insert(0, str(_VIEWER_DIR))
 
-import generate_review  # noqa: E402
 from generate_review import (  # noqa: E402
     build_run,
     embed_file,

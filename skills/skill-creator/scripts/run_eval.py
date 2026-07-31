@@ -18,7 +18,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from scripts.runners import get_runner, detect_available_runners
+from scripts.runners import detect_available_runners, get_runner
 from scripts.runners.base import SkillContext
 from scripts.utils import ensure_utf8_stdio, parse_skill_md, prompt_choose_backend
 

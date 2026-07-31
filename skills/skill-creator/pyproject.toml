@@ -1,0 +1,43 @@
+[project]
+name = "skill-creator"
+version = "2.2.0"
+description = "创建新技能、修改优化已有技能、运行评测、分析技能表现、优化技能描述的工程化工具链"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.5",
+    "mypy>=1.10",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+exclude = [
+    "eval-viewer/vendor",
+    ".pytest_cache",
+]
+extend-exclude = ["**/__pycache__"]
+
+[tool.ruff.lint]
+# 只启用实质规则：错误/未使用（E/F/W）、导入排序（I）、bug 检测（B）、
+# pyupgrade（UP）。不启用 SIM/C4/RUF 等风格建议类规则 —— 它们会诱导对无问题的代码做挑刺式改写（如 if-else 改三元、try-except 改 suppress）。
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+    # 默认参数中的可调用对象是既有代码风格，不强改
+    "B008",
+    # 行宽不做硬性限制（中文注释与长字符串较多，格式从宽）
+    "E501",
+    # utils.py 中 EOFError 的 raise 写法为既有代码，保留不改
+    "B904",
+]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["scripts", "eval-viewer", "tests"]
+ignore_missing_imports = true
+warn_unused_configs = true

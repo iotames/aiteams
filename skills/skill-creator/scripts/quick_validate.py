@@ -3,9 +3,9 @@
 技能快速校验脚本 —— 最小版本
 """
 
-import sys
-import re
 import json
+import re
+import sys
 from pathlib import Path
 
 # 复用 utils 的 frontmatter 解析（避免行为漂移）；独立运行（python scripts/quick_validate.py）
@@ -162,7 +162,7 @@ def validate_skill(skill_path):
         if isinstance(allowed_tools, list):
             return False, (
                 "'allowed-tools' 必须是空格分隔的字符串，而不是 YAML 列表。"
-                f"示例：allowed-tools: Read Write Bash(git:*)"
+                "示例：allowed-tools: Read Write Bash(git:*)"
             )
         if not isinstance(allowed_tools, str) or not allowed_tools.strip():
             return False, "'allowed-tools' 必须是非空且以空格分隔的字符串"

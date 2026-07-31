@@ -5,15 +5,12 @@ fake-runner 方案（ProcessPoolExecutor -> ThreadPoolExecutor）加 FakeLLM，
 不接触网络或 CLI。
 """
 
-import json
 import tempfile
 import unittest
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
 from scripts.run_loop import run_loop, split_eval_set
-from scripts.runners.base import SkillContext
 
 
 class FakeResult:
@@ -315,7 +312,7 @@ class RunLoopTest(unittest.TestCase):
             {"做一个PDF": 0.0, "写一封邮件": 0.0, "查天气": 0.0, "转xlsx表格": 0.0}
         )
         llm = FakeLLM(["<new_description>x</new_description>"])
-        out = run_loop(
+        run_loop(
             eval_set=make_eval_set(),
             skill_path=skill,
             description_override="初始描述",

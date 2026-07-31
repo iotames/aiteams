@@ -444,7 +444,7 @@ def main():
     configs = [k for k in run_summary if k != "delta"]
     delta = run_summary.get("delta", {})
 
-    print(f"\n摘要：")
+    print("\n摘要：")
     for config in configs:
         pr = run_summary[config]["pass_rate"]["mean"]
         label = _config_label(config)

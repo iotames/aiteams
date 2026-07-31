@@ -17,15 +17,11 @@ import base64
 import io
 import json
 import mimetypes
-import os
 import re
-import signal
-import subprocess
 import sys
-import time
 import webbrowser
 from functools import partial
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 
@@ -303,26 +299,6 @@ def generate_html(
 # HTTP 服务器（仅标准库，零依赖）
 # ---------------------------------------------------------------------------
 
-def _kill_port(port: int) -> None:
-    """终止监听指定端口的任何进程。"""
-    try:
-        result = subprocess.run(
-            ["lsof", "-ti", f":{port}"],
-            capture_output=True, text=True, timeout=5,
-        )
-        for pid_str in result.stdout.strip().split("\n"):
-            if pid_str.strip():
-                try:
-                    os.kill(int(pid_str.strip()), signal.SIGTERM)
-                except (ProcessLookupError, ValueError):
-                    pass
-        if result.stdout.strip():
-            time.sleep(0.5)
-    except subprocess.TimeoutExpired:
-        pass
-    except FileNotFoundError:
-        print("提示：未找到 lsof，无法检查端口是否被占用", file=sys.stderr)
-
 class ReviewHandler(BaseHTTPRequestHandler):
     """托管审查 HTML 并处理反馈保存。
 
@@ -454,19 +430,19 @@ def main() -> None:
         print(f"\n  静态查看器已写入：{args.static}\n")
         sys.exit(0)
 
-    # 终止目标端口上的任何已有进程
-    port = args.port
-    _kill_port(port)
     handler = partial(ReviewHandler, workspace, skill_name, feedback_path, previous, benchmark_path)
+
+    # 绑定目标端口；若被占用则回退到随机空闲端口，绝不终止占用端口的进程
+    port = args.port
     try:
         server = HTTPServer(("127.0.0.1", port), handler)
     except OSError:
-        # 终止尝试后端口仍被占用 —— 找一个空闲端口
+        print(f"端口 {port} 已被占用，改用随机空闲端口", file=sys.stderr)
         server = HTTPServer(("127.0.0.1", 0), handler)
         port = server.server_address[1]
 
     url = f"http://localhost:{port}"
-    print(f"\n  评测查看器")
+    print("\n  评测查看器")
     print(f"  {'-' * 33}")
     print(f"  地址：      {url}")
     print(f"  工作区：    {workspace}")
@@ -475,7 +451,7 @@ def main() -> None:
         print(f"  上一轮：    {args.previous_workspace}（{len(previous)} 个运行）")
     if benchmark_path:
         print(f"  基准数据：  {benchmark_path}")
-    print(f"\n  按 Ctrl+C 停止。\n")
+    print("\n  按 Ctrl+C 停止。\n")
 
     webbrowser.open(url)
 

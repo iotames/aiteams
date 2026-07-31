@@ -12,7 +12,7 @@ import re
 import sys
 from pathlib import Path
 
-from scripts.llm import get_llm_client, detect_available_llms
+from scripts.llm import detect_available_llms, get_llm_client
 from scripts.utils import ensure_utf8_stdio, parse_skill_md, prompt_choose_backend
 
 
@@ -107,7 +107,7 @@ Here are some tips that we've found to work well in writing these descriptions:
 - The description competes with other skills for the agent's attention — make it distinctive and immediately recognizable.
 - If you're getting lots of failures after repeated attempts, change things up. Try different sentence structures or wordings.
 
-I'd encourage you to be creative and mix up the style in different iterations since you'll have multiple opportunities to try different approaches and we'll just grab the highest-scoring one at the end. 
+I'd encourage you to be creative and mix up the style in different iterations since you'll have multiple opportunities to try different approaches and we'll just grab the highest-scoring one at the end.
 
 Please respond with only the new description text in <new_description> tags, nothing else."""
 

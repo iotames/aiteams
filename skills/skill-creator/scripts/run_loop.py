@@ -17,10 +17,10 @@ from pathlib import Path
 
 from scripts.generate_report import generate_html
 from scripts.improve_description import improve_description
-from scripts.llm import get_llm_client, detect_available_llms
-from scripts.runners import get_runner, detect_available_runners
+from scripts.llm import detect_available_llms, get_llm_client
+from scripts.run_eval import _make_project_root, run_eval
+from scripts.runners import detect_available_runners, get_runner
 from scripts.runners.base import SkillContext
-from scripts.run_eval import run_eval, _make_project_root
 from scripts.utils import (
     can_open_browser,
     ensure_utf8_stdio,
@@ -208,7 +208,7 @@ def run_loop(
 
         # 根据 train 结果改进描述
         if verbose:
-            print(f"\n正在改进描述...", file=sys.stderr)
+            print("\n正在改进描述...", file=sys.stderr)
 
         t0 = time.time()
         # 从历史中剔除 test 分数，避免改进模型看到它们

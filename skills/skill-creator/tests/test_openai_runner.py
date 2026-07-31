@@ -5,16 +5,15 @@ import json
 import unittest
 from unittest import mock
 
+from scripts.llm import detect_available_llms, get_llm_client
+from scripts.runners import detect_available_runners, get_runner
 from scripts.runners.base import SkillContext
 from scripts.runners.openai import (
-    OpenAICompatRunner,
     TOOL_NAME,
+    OpenAICompatRunner,
     build_chat_body,
     triggered_by_response,
 )
-from scripts.llm import get_llm_client, detect_available_llms
-from scripts.runners import get_runner, detect_available_runners
-
 
 CTX = SkillContext(skill_name="pdf-processing", description="Extract PDF text and merge files.")
 

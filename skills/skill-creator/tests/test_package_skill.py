@@ -4,11 +4,11 @@
 不联网；校验使用真实的 quick_validate 规则。
 """
 
+import json
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
-import json
 
 from scripts.package_skill import package_skill, should_exclude
 

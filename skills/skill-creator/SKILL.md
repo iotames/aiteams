@@ -51,6 +51,18 @@ SKILL.md 是写给 AI 模型看的**使用说明书**，不是技术实现文档
 
 > 依赖声明约定：新技能的依赖**不强制** requirements.txt —— 依赖什么语言就声明什么，写在 frontmatter 的 `compatibility` 字段（≤500 字符，如 `Requires Python 3.14+ and uv`）或 SKILL.md 正文「环境要求」节。requirements.txt 仅用于本技能（skill-creator）自身工具链的运行时依赖。
 
+### 不挑刺原则
+
+使用本工具做工程化检查（lint、类型检查、代码审查）时，**只修实质问题，不做挑刺式改写**。
+
+- **实质问题才改代码**：bug、未定义/未使用变量、死代码、未使用导入、错误处理缺陷。
+- **风格建议不改代码**：if-else 改三元、try-except 改 `contextlib.suppress`、嵌套 if 合并、
+  `set()` 改推导式等纯风格建议，一律不动现有代码。
+- **规则服务于代码**：如果 lint 报了风格类建议而代码本身没问题，在配置里 `ignore` 该规则，
+  而不是改代码去迁就规则。
+- **为什么**：对无问题的代码做风格改写会引入噪音 diff、掩盖真实变更、降低可读性。
+  工程化检查的价值在于发现缺陷，不在于让代码符合某套风格偏好。
+
 ---
 
 ## 模型无关架构（核心原则）
@@ -347,3 +359,5 @@ cloud-deploy/
 
 > 环境：依赖先 `pip install -r requirements.txt`（仅 PyYAML），Python 3.10+。
 > 测试：`python -m unittest discover -s tests`（无需额外安装）。
+> 工程化检查（可选）：`python3 -m ruff check .`（lint，实质规则 E/F/W/I/B/UP）；
+> `python3 -m mypy scripts/`（类型检查，项目尚未全面标注，报错作为渐进目标、不阻塞）。

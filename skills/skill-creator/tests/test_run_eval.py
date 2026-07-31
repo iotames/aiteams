@@ -35,7 +35,7 @@ class FakeRunner:
         desc = (skill_ctx.description or "").lower()
         q = query.lower()
         matched = any(k.lower() in desc and k.lower() in q for k in self.keywords)
-        triggered = matched and (self.partial and self.counter % 3 == 0 or not self.partial)
+        triggered = matched and ((self.partial and self.counter % 3 == 0) or not self.partial)
         return FakeResult(triggered)
 
 
