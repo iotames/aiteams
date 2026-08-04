@@ -7,6 +7,8 @@ description: 升级 oh-my-openagent Agent 提示词。当用户要求同步上�
 
 将 upstream [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) 的 Agent prompt 变更同步到本地 OpenCode 格式 + 中文翻译版。
 
+注：如用户没主动提示从远程或者线上下载，**优先使用离线**的本地仓库，以避免重复下载。
+
 ## 目录结构
 
 ```
@@ -52,16 +54,19 @@ oh-my-openagent/
 | Librarian | `packages/omo-opencode/src/agents/librarian.ts` | `origin/librarian.md` | `agents/librarian.md` | 静态 TypeScript 常量 |
 | Multimodal Looker | `packages/omo-opencode/src/agents/multimodal-looker.ts` | `origin/multimodal-looker.md` | `agents/multimodal-looker.md` | 静态 TypeScript 常量 |
 | Sisyphus-Junior | `packages/omo-opencode/src/agents/sisyphus-junior/default.ts` | `origin/sisyphus-junior.md` | `agents/sisyphus-junior.md` | 静态 TypeScript 常量 |
-| Sisyphus | `packages/omo-opencode/src/agents/sisyphus/default.ts` + `sisyphus-dynamic-prompt-*.ts` | `origin/sisyphus.md` | `agents/sisyphus.md` | **动态模板** |
-| Hephaestus | `packages/omo-opencode/src/agents/hephaestus/gpt.ts` | `origin/hephaestus.md` | `agents/hephaestus.md` | **动态模板** |
+| Sisyphus | `packages/omo-opencode/src/agents/sisyphus/claude-fable-5.ts`（+ 共享 `dynamic-agent-*.ts` builders） | `origin/sisyphus.md` | `agents/sisyphus.md` | **动态模板** |
+| Hephaestus | `packages/omo-opencode/src/agents/hephaestus/gpt.ts`（+ 共享 `dynamic-agent-*.ts` builders） | `origin/hephaestus.md` | `agents/hephaestus.md` | **动态模板** |
+
+> 共享 builder 文件（`dynamic-agent-core-sections.ts`、`dynamic-agent-policy-sections.ts`、`dynamic-agent-prompt-builder.ts` 等）存放各 Agent 共用的动态 section 生成函数。Sisyphus/Hephaestus/Metis/Sisyphus-Junior 的模板通过 `${buildXxxSection()}` 引用这些函数。
 
 ## 步骤
 
-### 第 0 步：拉取上游最新
+### 第 0 步：拉取上游最新【可选。有限使用本地离线仓库更新】
 
 ```bash
 # 克隆或 fetch 上游 dev 分支到临时目录
 UPSTREAM=$(mktemp -d)
+# 如果用户指定或你发现本地有仓库，则优先使用git pull，然后在进行下一步。不要重复 git clone 占用时间
 git clone --depth 1 --branch dev https://github.com/code-yeongyu/oh-my-openagent.git "$UPSTREAM"
 ```
 
@@ -76,8 +81,8 @@ git clone --depth 1 --branch dev https://github.com/code-yeongyu/oh-my-openagent
 从上游 `.ts` 文件中提取 system prompt 字符串常量，与本地 `origin/<agent>.md` 比对。
 
 **动态模板类型**（Sisyphus, Hephaestus）：
-- 核心指令部分来自 `default.ts` / `gpt.ts`
-- 模板中的动态 section 标记（如 `{{delegation_table}}`、`{{skills_guide}}`）需比对这些 section 的生成逻辑是否变化
+- 核心指令部分来自 `sisyphus/claude-fable-5.ts`（Sisyphus 的 Claude 主变体）/ `hephaestus/gpt.ts`
+- 模板中的动态 section 标记（如 `${keyTriggers}`、`${delegationTable}`、`${toolSelection}`）需比对这些 section 的生成逻辑是否变化（见 `dynamic-agent-*.ts`）
 - 只比对核心模板本身，不运行动态注入
 
 比对方式：
@@ -107,7 +112,9 @@ diff -u "$SELF/origin/<agent>.md" "$UPSTREAM/<对应源码路径>" || echo "有�
 
 **动态模板特殊处理**：
 - Sisyphus/Hephaestus 的 `agents/<agent>.md` 中只保留核心指令部分
-- 模板中的 `{{variable}}` 占位符保持原样不翻译
+- 模板中的 `${variable}` 占位符保持原样不翻译（如 `${keyTriggers}`、`${delegationTable}`、`${oracleSection}`）
+- **静态 builder 段渲染内联**：无运行时参数的 builder（如 `buildAntiDuplicationSection()`、`buildHardBlocksSection()`、`buildAntiPatternsSection()`、`buildTodoDisciplineSection()`）在 origin 中渲染为完整内容并内联，翻译时也照译；依赖运行时 Agent/工具/技能列表的 section（key triggers、tool selection、delegation table 等）保留 `${...}` 占位符
+- origin 提取**保留源码转义原样**（`\``、`\`\`\``、`\${` 不还原），与既有 origin 文件格式一致；仅把静态 builder 内容按源码原样内联
 - 在正文开头加注释注明此为静态核心模板，动态 section 在运行时注入
 
 ### 第 4 步：验证
@@ -157,5 +164,6 @@ rm -rf "$UPSTREAM"
 
 - 每个 `task()` 委托处理一个 Agent 的升级，并行执行
 - 动态模板 Agent（Sisyphus/Hephaestus）只比对核心指令部分，不涉及运行时注入的 section
-- Hephaestus 上游只有 GPT 版本，翻译时注意模型无关性
-- Sisyphus-Junior 有多个模型变体（gemini/gpt-5/kimi），只关注 Claude 系列的 default 版本
+- Sisyphus 上游有多个变体（claude-fable-5 / claude-opus-5 / claude-opus-4-8 / claude-opus-4-7 / gpt-5-4 / gpt-5-5 / kimi-* / gemini 等），只提取 Claude Fable 5 变体作为主版本；翻译时注意模型无关性
+- Hephaestus 上游有 gpt.ts / gpt-5-4 / gpt-5-5 / gpt-5-6 变体，只提取 `gpt.ts`（通用 GPT fallback）作为主版本
+- Sisyphus-Junior 有多个模型变体（gemini/gpt-5/kimi），只关注 Claude 系列的 default 版本（`useTaskSystem=false`，TODO 模式）
