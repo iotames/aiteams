@@ -8,12 +8,14 @@ import re
 import sys
 from pathlib import Path
 
-# 复用 utils 的 frontmatter 解析（避免行为漂移）；独立运行（python scripts/quick_validate.py）
-# 时 scripts 包不可用，回退到同目录的 utils 模块。
-try:
-    from scripts.utils import ensure_utf8_stdio, extract_frontmatter
-except ImportError:
+# 复用 utils 的 frontmatter 解析（避免行为漂移）。-m 方式运行（cwd 为技能根目录）时
+# 走包导入；独立运行（python scripts/quick_validate.py）时把脚本目录加入 sys.path。
+# 刻意不捕获 ImportError：yaml 缺失等依赖错误应原样暴露，便于定位。
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
     from utils import ensure_utf8_stdio, extract_frontmatter
+else:
+    from scripts.utils import ensure_utf8_stdio, extract_frontmatter
 
 EVALS_SCHEMA_FIELDS = ('id', 'prompt', 'expected_output', 'files', 'expectations')
 
