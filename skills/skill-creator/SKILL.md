@@ -7,7 +7,7 @@ description: >-
   也适用于用户询问"怎么写 SKILL.md"、"技能应该包含什么内容"。
 license: Apache-2.0
 metadata:
-  version: "2.3.1"
+  version: "2.4.0"
 allowed-tools: Read Write Edit Bash Glob Grep Task Fleet ReadFile ReadSkill RunSkill WebFetch Research Review
 ---
 
@@ -144,10 +144,14 @@ SKILL.md 是写给 AI 模型看的**使用说明书**，不是技术实现文档
 
 ```bash
 # 在技能根目录运行
-python -m scripts.init_skill <skill-name> --path <输出目录> [--resources scripts,references,assets] [--examples]
+python -m scripts.init_skill <skill-name> --path <输出目录> [--resources scripts,references,assets] [--examples] [--minimal]
 ```
 
-脚本会规范化名称（kebab-case、≤64 字符、与目录名一致），生成 SKILL.md 模板与结构模式建议，可选创建资源目录和示例文件。生成后按上文填写，删除不需要的示例。
+脚本会规范化名称（kebab-case、≤64 字符、与目录名一致），生成干净的 SKILL.md 模板，可选创建资源目录和示例文件；`--minimal` 只生成 frontmatter 与标题的空画布。模板**不含固定结构模式**：正文结构按任务自然形态自由设计，只有拿不准时才查阅 `references/structure-patterns.md`。生成后按上文填写，删除不需要的示例。
+
+**何时用模板**：
+- 结构错误（如 frontmatter 格式、命名、目录布局）影响技能加载和功能。→ 用模板，它是护栏。
+- 已明确结构、任务形态独特时用 `--minimal` 空画布直接自由设计。→ 模板只是噪音。
 
 根据用户调研，填充以下内容：
 
@@ -214,6 +218,7 @@ cloud-deploy/
 - **「何时使用」只写进 description，不写进正文**：正文在触发后才加载，正文里的「适用场景」章节对触发毫无帮助。
 - **禁止杂质文档**：技能内不放 README.md、INSTALLATION_GUIDE.md、QUICK_REFERENCE.md、CHANGELOG.md 等辅助说明。技能只装执行任务所需的内容，这些文档只会增加噪音、让上下文膨胀。
 - **避免重复**：同一信息只存在一个地方（SKILL.md 或 references/）。references 不复制 SKILL.md 已有内容——两处都写必然漂移，且浪费上下文。
+- **结构自由**：章节组织按任务自然形态设计，没有固定模板；常见模式仅作参考（`references/structure-patterns.md`），不要为套模式而扭曲内容。
 
 #### 不意外原则
 
@@ -419,6 +424,7 @@ cloud-deploy/
 | 查看器各标签页详细说明 | `references/viewer.md` |
 | 盲比 / 分析 benchmark 模式 | `references/advanced.md` |
 | 评测后端可插拔扩展（新 runner） | `references/runners.md` |
+| 拿不准技能章节结构时 | `references/structure-patterns.md` |
 
 ## 参考文件
 
@@ -430,12 +436,13 @@ cloud-deploy/
 - `references/description-optimization.md` — 描述优化完整流程
 - `references/viewer.md` — 评测查看器界面说明
 - `references/advanced.md` — 盲比与 benchmark 分析进阶
+- `references/structure-patterns.md` — 常见章节结构模式（仅结构拿不准时参考）
 - `agents/grader.md` — 评分指令
 - `agents/comparator.md` — 盲比 A/B 比较
 - `agents/analyzer.md` — 分析 benchmark 结果
 - `assets/eval_review.html` — 评测查询审查模板
 - `eval-viewer/generate_review.py` — 评测查看器生成脚本
-- `scripts/init_skill.py` — 初始化脚手架（生成技能目录与 SKILL.md 模板）
+- `scripts/init_skill.py` — 初始化脚手架（生成技能目录与 SKILL.md 模板/空画布）
 
 > 环境：依赖先 `pip install -r requirements.txt`（仅 PyYAML），Python 3.10+。若报
 > `No module named 'yaml'`，先安装依赖；若报 `No module named 'scripts'`，先 cd 到技能根目录再运行。

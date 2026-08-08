@@ -3,7 +3,7 @@
 技能初始化脚手架 —— 从模板生成新技能目录与 SKILL.md
 
 用法：
-    python -m scripts.init_skill <skill-name> --path <输出目录> [--resources scripts,references,assets] [--examples]
+    python -m scripts.init_skill <skill-name> --path <输出目录> [--resources scripts,references,assets] [--examples] [--minimal]
 
 示例：
     python -m scripts.init_skill flipbook-download --path ~/.agents/skills
@@ -34,31 +34,11 @@ description: >-
 
 [TODO: 1-2 句话说明该技能实现什么]
 
-## 技能结构（完成后删除本段）
+## [TODO: 设计主章节，替换本行]
 
-选择最适合本技能的结构，常见模式可混合：
-
-**1. 工作流式**（适合顺序流程）
-- 有清晰的逐步流程时适用
-- 例：文档技能「工作流决策树 → 读取 → 创建 → 编辑」
-- 结构：# 概述 → # 工作流决策树 → # 第 1 步 → # 第 2 步……
-
-**2. 任务式**（适合工具集合）
-- 技能提供多种操作/能力时适用
-- 例：PDF 技能「快速开始 → 合并 PDF → 拆分 PDF → 提取文本」
-- 结构：# 概述 → # 快速开始 → # 任务分类 1 → # 任务分类 2……
-
-**3. 规范式**（适合标准与规范）
-- 适合品牌规范、编码标准、需求文档
-- 例：品牌规范「品牌规范 → 颜色 → 字体 → 使用」
-- 结构：# 概述 → # 规范 → # 规格 → # 用法……
-
-**4. 能力式**（适合集成系统）
-- 技能提供多个相互关联的功能时适用
-- 例：产品管理「核心能力 → 编号能力列表」
-- 结构：# 概述 → # 核心能力 → ### 1. 功能 → ### 2. 功能……
-
-## [TODO: 按选定结构替换第一个主章节]
+正文结构按任务自然形态**自由设计**，没有固定模板。只有对结构拿不准时才参考
+创建工具（skill-creator）自带的 `references/structure-patterns.md` 常见模式；
+模式只是起点，不要为了套模板而扭曲内容。
 
 [TODO: 添加正文。要点：
 - 使用祈使句，解释"为什么"而不是堆砌"必须"
@@ -90,6 +70,19 @@ description: >-
 ---
 
 **并非每个技能都需要三类资源。**
+"""
+
+MINIMAL_TEMPLATE = """---
+name: {skill_name}
+description: >-
+  [TODO: 用 1-2 句话说明该技能让智能体做什么，并写清楚"何时使用"的触发
+  场景（用户表达、文件类型、任务类型）。description 是触发机制的核心，
+  写得稍微强势一点，覆盖正式/随意/隐晦的表述。]
+---
+
+# {skill_title}
+
+[TODO: 正文。结构完全自由设计。]
 """
 
 EXAMPLE_SCRIPT = '''#!/usr/bin/env python3
@@ -184,13 +177,13 @@ def create_resource_dirs(skill_dir: Path, skill_name: str, skill_title: str,
 
 
 def init_skill(skill_name: str, path: str, resources: list[str],
-               include_examples: bool) -> Path | None:
+               include_examples: bool, minimal: bool = False) -> Path | None:
     """初始化技能目录：创建目录、生成 SKILL.md 模板、可选资源目录。
 
     返回技能目录路径，失败返回 None。
     """
     try:
-        return _init_skill(skill_name, path, resources, include_examples)
+        return _init_skill(skill_name, path, resources, include_examples, minimal)
     except OSError as e:
         # 权限不足、磁盘错误、目录被占用（含损坏符号链接）等统一友好报错
         print(f"[错误] 无法创建技能：{e}")
@@ -198,7 +191,7 @@ def init_skill(skill_name: str, path: str, resources: list[str],
 
 
 def _init_skill(skill_name: str, path: str, resources: list[str],
-                include_examples: bool) -> Path | None:
+                include_examples: bool, minimal: bool = False) -> Path | None:
     """init_skill 的实际实现；I/O 错误由 init_skill 统一捕获。"""
     if len(skill_name) > MAX_SKILL_NAME_LENGTH:
         print(f"[错误] 技能名过长（{len(skill_name)} 字符），上限 {MAX_SKILL_NAME_LENGTH}。")
@@ -213,10 +206,11 @@ def _init_skill(skill_name: str, path: str, resources: list[str],
     print(f"[OK] 已创建技能目录：{skill_dir}")
 
     skill_title = title_case_skill_name(skill_name)
+    template = MINIMAL_TEMPLATE if minimal else SKILL_TEMPLATE
     (skill_dir / "SKILL.md").write_text(
-        SKILL_TEMPLATE.format(skill_name=skill_name, skill_title=skill_title),
+        template.format(skill_name=skill_name, skill_title=skill_title),
         encoding="utf-8")
-    print("[OK] 已创建 SKILL.md 模板")
+    print(f"[OK] 已创建 SKILL.md{'（空画布）' if minimal else ' 模板'}")
 
     if resources:
         create_resource_dirs(skill_dir, skill_name, skill_title, resources, include_examples)
@@ -241,6 +235,9 @@ def main() -> None:
     parser.add_argument(
         "--examples", action="store_true",
         help="在选中的资源目录里创建示例文件")
+    parser.add_argument(
+        "--minimal", action="store_true",
+        help="生成空画布 SKILL.md（仅 frontmatter 与标题，结构完全自由）")
     args = parser.parse_args()
 
     skill_name = normalize_skill_name(args.skill_name)
@@ -258,7 +255,7 @@ def main() -> None:
         print("[错误] --examples 需要同时设置 --resources。")
         sys.exit(1)
 
-    result = init_skill(skill_name, args.path, resources, args.examples)
+    result = init_skill(skill_name, args.path, resources, args.examples, args.minimal)
     sys.exit(0 if result else 1)
 
 

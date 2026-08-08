@@ -95,3 +95,20 @@ class InitSkillTest(unittest.TestCase):
     def test_name_too_long_fails(self):
         long_name = "a" * (MAX_SKILL_NAME_LENGTH + 1)
         self.assertIsNone(init_skill(long_name, str(self.tmp), [], False))
+
+    def test_template_has_no_fixed_structure_patterns(self):
+        result = init_skill("free-form", str(self.tmp), [], False)
+        self.assertIsNotNone(result)
+        content = (result / "SKILL.md").read_text(encoding="utf-8")
+        for pattern in ("工作流式", "任务式", "规范式", "能力式"):
+            self.assertNotIn(pattern, content)
+        self.assertIn("自由设计", content)
+
+    def test_minimal_creates_bare_skill(self):
+        result = init_skill("bare-skill", str(self.tmp), [], False, minimal=True)
+        self.assertIsNotNone(result)
+        content = (result / "SKILL.md").read_text(encoding="utf-8")
+        ok, msg = validate_skill(result)
+        self.assertTrue(ok, msg)
+        self.assertNotIn("资源（可选）", content)
+        self.assertNotIn("正文结构按任务自然形态", content)
