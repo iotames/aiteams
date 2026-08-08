@@ -16,8 +16,8 @@
 3. **先问再写**：任务存在歧义时，先提问澄清再执行。复杂任务先出方案，认可后实施。
 
 **Git提交前强制自查步骤**（每次 commit 前必须执行）：
-1. 检查 message 全文是否包含 `Co-Authored`、`Assisted-by`、`Crush`、`Generated` 等关键词
-2. 确认末尾没有多余署名行（用户指定的格式除外）
+1. 提交Git之前，用 `git status`, `git diff --stat`, `git diff` 对全部待提交的代码进行没有上下文目标意图污染的独立窗口审核，有问题直接阻止。
+2. 检查 message 全文，不能包含 `Co-Authored`、`Assisted-by`、`Crush`、`Generated` 等多余署名（用户指定的格式除外）
 3. 确认 message 只包含必要的变更描述和用户许可的内容
 
 ## 命令行规则
