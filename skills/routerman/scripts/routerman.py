@@ -62,15 +62,36 @@ def sha256(s):
 
 
 def _curl(args):
-    """执行 curl，返回 (响应头, 响应体)。"""
+    """执行 curl，返回 (响应头, 响应体)。
+
+    带超时保护（默认 10s，可用环境变量 ROUTER_TIMEOUT 覆盖），
+    超时、连接失败或无响应时抛 RuntimeError，绝不无限挂起。
+    """
+    try:
+        timeout = float(os.environ.get("ROUTER_TIMEOUT", "10"))
+    except ValueError:
+        timeout = 10.0
+    if timeout < 1:
+        timeout = 10.0
     hdr_f = os.path.join(TMP_DIR, "_hdr.txt")
     body_f = os.path.join(TMP_DIR, "_body.txt")
-    subprocess.run(
-        ["curl", "-s", "-D", hdr_f, "-o", body_f, "--insecure"] + args,
+    proc = subprocess.run(
+        ["curl", "-s", "-D", hdr_f, "-o", body_f, "--insecure",
+         "--max-time", str(timeout)] + args,
         capture_output=True,
     )
-    hdr = open(hdr_f, encoding="utf-8", errors="replace").read()
-    body = open(body_f, encoding="utf-8", errors="replace").read()
+    if proc.returncode != 0:
+        err = proc.stderr.decode(errors="replace").strip()
+        raise RuntimeError(
+            f"路由器请求失败(curl 退出码 {proc.returncode}, 超时 {timeout:.0f}s)"
+            + (f": {err}" if err else "")
+            + "，请检查路由器地址与网络连通性"
+        )
+    try:
+        hdr = open(hdr_f, encoding="utf-8", errors="replace").read()
+        body = open(body_f, encoding="utf-8", errors="replace").read()
+    except FileNotFoundError:
+        raise RuntimeError(f"路由器无响应（超时 {timeout:.0f}s）")
     return hdr, body
 
 
@@ -81,6 +102,29 @@ def _cookies_of(hdr):
         if m:
             cookies[m.group(1)] = m.group(2)
     return cookies
+
+
+# ---------- 进度日志（统一走 stderr，stdout 保持机器可解析） ----------
+
+def _elapsed(start):
+    """从 start 到现在的耗时字符串。"""
+    return f"{time.time() - start:.1f}s"
+
+
+def _log(msg):
+    """进度/调试日志 → stderr。结果输出一律走 stdout，互不干扰。"""
+    print(f"[routerman] {msg}", file=sys.stderr)
+
+
+def _step(i, total, desc):
+    """打印阶段进度（如 [1/3] 登录路由器 ...），返回本步开始时间。"""
+    _log(f"[{i}/{total}] {desc} ...")
+    return time.time()
+
+
+def _step_done(t0, extra=""):
+    """打印阶段完成与耗时（如 完成 (0.8s)），可带附加信息。"""
+    _log(f"    完成 ({_elapsed(t0)})" + (f" {extra}" if extra else ""))
 
 
 def _cookie_str(cookies):
@@ -153,16 +197,27 @@ def parse_preempt_sessions(page):
 
 
 class Router:
-    """ZTE 路由器 HTTP API 客户端。"""
+    """ZTE 路由器 HTTP API 客户端。
 
-    def __init__(self, cfg):
+    verbose=True 时打印每个 HTTP 请求的 method/path/状态行/耗时到 stderr。
+    """
+
+    def __init__(self, cfg, verbose=False):
         self.cfg = cfg
         self.base = cfg.get("ROUTER_ADDR", BASE).rstrip("/")
         self.cookies = {"_TESTCOOKIESUPPORT": "1"}
         self.session_token = ""
+        self.verbose = verbose
+
+    def _req_log(self, method, path, hdr, t0):
+        if not self.verbose:
+            return
+        first = hdr.splitlines()[0] if hdr else "(无响应)"
+        _log(f"  {method} {path} -> {first} ({_elapsed(t0)})")
 
     # ---------- 底层请求 ----------
     def get(self, path, extra_headers=None):
+        t0 = time.time()
         args = ["-b", _cookie_str(self.cookies)]
         h = {"User-Agent": UA}
         if extra_headers:
@@ -172,9 +227,11 @@ class Router:
         args += [self.base + path]
         hdr, body = _curl(args)
         self.cookies.update(_cookies_of(hdr))
+        self._req_log("GET", path, hdr, t0)
         return hdr, body
 
     def post(self, path, body_data, extra_headers=None):
+        t0 = time.time()
         args = ["-X", "POST", "--data-raw", body_data,
                 "-H", f"Check: {sha256(body_data)}",
                 "-H", "Content-Type: application/x-www-form-urlencoded"]
@@ -187,6 +244,7 @@ class Router:
         args += [self.base + path]
         hdr, body = _curl(args)
         self.cookies.update(_cookies_of(hdr))
+        self._req_log("POST", path, hdr, t0)
         return hdr, body
 
     # ---------- 登录流程 ----------
@@ -218,11 +276,13 @@ class Router:
         self.post("/", "IF_ModeSwitch=Advanced",
                   {"Origin": self.base, "Referer": self.base + "/"})
 
-    def login(self, auto_preempt=False):
+    def login(self, auto_preempt=False, _retries=0):
         """完整登录流程，成功返回 SID。
 
         auto_preempt=True 时，若检测到其他用户占用，自动抢占踢出全部占用会话后继续登录；
         否则检测到占用时抛出 PreemptRequired（含会话列表）。
+
+        抢占踢出最多重试 3 轮：若占用方反复重登导致始终抢占不成功，抛 PreemptRequired。
         """
         hdr, body = self._login_request()
         first = hdr.splitlines()[0]
@@ -234,9 +294,11 @@ class Router:
             raise RuntimeError(f"登录失败: {first}\n{body[:300]}")
         if not auto_preempt:
             raise PreemptRequired(sessions)
+        if _retries >= 3:
+            raise PreemptRequired(sessions)
         for s in sessions:
             self.preempt_kick(s["sessid"])
-        return self.login(auto_preempt=True)
+        return self.login(auto_preempt=True, _retries=_retries + 1)
 
     def detect_preempt(self):
         """执行登录请求，检测是否被其他用户占用。
@@ -475,6 +537,8 @@ def _print_items(items):
 def main():
     parser = argparse.ArgumentParser(description="ZTE 路由器常用操作")
     parser.add_argument("--env", default=".env", help="env 文件路径（默认 .env）")
+    parser.add_argument("--verbose", action="store_true",
+                        help="打印每个 HTTP 请求详情到 stderr")
     sub = parser.add_subparsers(dest="cmd")
 
     # 登录
@@ -546,15 +610,20 @@ def main():
         sys.exit(1)
 
     cfg = load_config(args.env)
-    r = Router(cfg)
+    r = Router(cfg, verbose=args.verbose)
 
     # kick-list：只检测，不登录
     if args.cmd == "kick-list":
+        start_all = time.time()
+        t0 = _step(1, 1, "探测是否被其他用户占用")
         try:
             sessions = r.detect_preempt()
         except RuntimeError as e:
+            _log(f"    失败: {e}")
             print(f"FAIL: {e}")
             sys.exit(1)
+        _step_done(t0)
+        _log(f"总耗时 {_elapsed(start_all)}")
         if not sessions:
             print("无其他用户占用，登录正常")
             return
@@ -565,11 +634,20 @@ def main():
 
     # kick：抢占踢出后登录
     if args.cmd == "kick":
+        start_all = time.time()
+        total = 3 if args.sessid else 2
+        i = 1
         try:
             if args.sessid:
+                t0 = _step(i, total, "探测占用会话")
                 sessions = r.detect_preempt() or []
+                _step_done(t0)
+                i += 1
                 if not sessions:
-                    r.login()
+                    t0 = _step(i, total, "登录路由器")
+                    sid = r.login()
+                    _step_done(t0, f"SID: {sid[:16]}...")
+                    _log(f"总耗时 {_elapsed(start_all)}")
                     print("无其他用户占用，登录正常")
                     return
                 if not any(s["sessid"] == args.sessid for s in sessions):
@@ -577,11 +655,20 @@ def main():
                     for s in sessions:
                         print(f"  sessid={s['sessid']}  {s['label']}")
                     sys.exit(1)
+                t0 = _step(i, total, f"踢出会话 {args.sessid[:16]}...")
                 r.preempt_kick(args.sessid)
+                _step_done(t0)
+                i += 1
+                t0 = _step(i, total, "重新登录")
                 sid = r.login()
+                _step_done(t0, f"SID: {sid[:16]}...")
+                _log(f"总耗时 {_elapsed(start_all)}")
                 print(f"OK: 已踢出 {args.sessid[:16]}... 并登录，SID: {sid[:16]}...")
             else:
+                t0 = _step(i, total, "登录并抢占踢出占用会话")
                 sid = r.login(auto_preempt=True)
+                _step_done(t0, f"SID: {sid[:16]}...")
+                _log(f"总耗时 {_elapsed(start_all)}")
                 print(f"OK: 抢占成功，已登录 SID: {sid[:16]}...")
         except PreemptRequired as e:
             print("FAIL: 仍有会话占用:", e)
@@ -592,57 +679,102 @@ def main():
             sys.exit(1)
         return
 
-    r.login(auto_preempt=False)
-    print(f"登录成功 SID: {r.cookies['SID'][:16]}...", file=sys.stderr)
-
+    start_all = time.time()
+    cmd_verbs = {
+        "login": "登录",
+        "dev-list": "查询已关联设备",
+        "pf-list": "查询端口转发列表", "pf-add": "新增端口转发", "pf-mod": "修改端口转发",
+        "pf-del": "删除端口转发", "pf-switch": "切换端口转发开关",
+        "pc-list": "查询父母控制列表", "pc-add": "新增父母控制", "pc-mod": "修改父母控制",
+        "pc-del": "删除父母控制", "pc-switch": "切换父母控制开关",
+    }
     feature = None
     if args.cmd.startswith("pf"):
         feature = "portforwarding"
     elif args.cmd.startswith("pc"):
         feature = "parentctrl"
+
+    total = 1 if args.cmd == "login" else 2 + (1 if feature else 0)
+    i = 1
+
+    t0 = _step(i, total, f"登录路由器 {cfg.get('ROUTER_ADDR', BASE)}")
+    try:
+        sid = r.login(auto_preempt=False)
+    except PreemptRequired as e:
+        _log(f"    失败: {e}")
+        print(f"FAIL: 其他用户正在设置设备: {e}")
+        print("可执行 kick-list 查看占用，或 kick 抢占后重试")
+        sys.exit(1)
+    except RuntimeError as e:
+        _log(f"    失败: {e}")
+        print(f"FAIL: {e}")
+        sys.exit(1)
+    _step_done(t0, f"SID: {sid[:16]}...")
+    i += 1
+
     if feature:
-        r.enter_feature(feature)
+        t0 = _step(i, total, f"进入功能页 {feature}")
+        try:
+            r.enter_feature(feature)
+        except RuntimeError as e:
+            _log(f"    失败: {e}")
+            print(f"FAIL: {e}")
+            sys.exit(1)
+        _step_done(t0)
+        i += 1
 
     if args.cmd == "login":
+        print(f"OK: 登录成功，SID: {sid[:16]}...")
+        _log(f"总耗时 {_elapsed(start_all)}")
         return
-    elif args.cmd == "dev-list":
-        _print_items(device_list(r))
-    elif args.cmd == "pf-list":
-        _print_items(pf_list(r))
-    elif args.cmd == "pf-add":
-        ok, err = pf_apply(r, args.alias, args.protocol, args.internal_client,
-                           args.external_port, internal_port=args.internal_port, enable=args.enable)
-        print("OK: 新增成功" if ok else f"FAIL: {err}")
-    elif args.cmd == "pf-mod":
-        ok, err = pf_apply(r, args.alias, args.protocol, args.internal_client,
-                           args.external_port, internal_port=args.internal_port,
-                           enable=args.enable, inst_id=args.inst_id)
-        print("OK: 修改成功" if ok else f"FAIL: {err}")
-    elif args.cmd == "pf-del":
-        ok, err = pf_delete(r, args.inst_id)
-        print("OK: 删除成功" if ok else f"FAIL: {err}")
-    elif args.cmd == "pf-switch":
-        ok, err = pf_switch(r, args.inst_id, args.enable)
-        print("OK: 开关设置成功" if ok else f"FAIL: {err}")
-    elif args.cmd == "pc-list":
-        _print_items(pc_list(r))
-    elif args.cmd in ("pc-add", "pc-mod"):
-        start = args.start.split(":"); sh, sm = int(start[0]), int(start[1])
-        end = args.end.split(":"); eh, em = int(end[0]), int(end[1])
-        inst_id = args.inst_id if args.cmd == "pc-mod" else "-1"
-        ok, err = pc_apply(r, args.name, args.mac, args.week, sh, sm, eh, em,
-                           filter_mode=args.mode, enable=args.enable,
-                           inst_id=inst_id, urls=args.url)
-        print("OK: 保存成功" if ok else f"FAIL: {err}")
-    elif args.cmd == "pc-del":
-        ok, err = pc_delete(r, args.inst_id)
-        print("OK: 删除成功" if ok else f"FAIL: {err}")
-    elif args.cmd == "pc-switch":
-        ok, err = pc_switch(r, args.inst_id, args.enable)
-        print("OK: 开关设置成功" if ok else f"FAIL: {err}")
-    else:
-        parser.print_help()
+
+    t0 = _step(i, total, f"执行 {cmd_verbs.get(args.cmd, args.cmd)}")
+    try:
+        if args.cmd == "dev-list":
+            _print_items(device_list(r))
+        elif args.cmd == "pf-list":
+            _print_items(pf_list(r))
+        elif args.cmd == "pf-add":
+            ok, err = pf_apply(r, args.alias, args.protocol, args.internal_client,
+                               args.external_port, internal_port=args.internal_port, enable=args.enable)
+            print("OK: 新增成功" if ok else f"FAIL: {err}")
+        elif args.cmd == "pf-mod":
+            ok, err = pf_apply(r, args.alias, args.protocol, args.internal_client,
+                               args.external_port, internal_port=args.internal_port,
+                               enable=args.enable, inst_id=args.inst_id)
+            print("OK: 修改成功" if ok else f"FAIL: {err}")
+        elif args.cmd == "pf-del":
+            ok, err = pf_delete(r, args.inst_id)
+            print("OK: 删除成功" if ok else f"FAIL: {err}")
+        elif args.cmd == "pf-switch":
+            ok, err = pf_switch(r, args.inst_id, args.enable)
+            print("OK: 开关设置成功" if ok else f"FAIL: {err}")
+        elif args.cmd == "pc-list":
+            _print_items(pc_list(r))
+        elif args.cmd in ("pc-add", "pc-mod"):
+            start = args.start.split(":"); sh, sm = int(start[0]), int(start[1])
+            end = args.end.split(":"); eh, em = int(end[0]), int(end[1])
+            inst_id = args.inst_id if args.cmd == "pc-mod" else "-1"
+            ok, err = pc_apply(r, args.name, args.mac, args.week, sh, sm, eh, em,
+                               filter_mode=args.mode, enable=args.enable,
+                               inst_id=inst_id, urls=args.url)
+            print("OK: 保存成功" if ok else f"FAIL: {err}")
+        elif args.cmd == "pc-del":
+            ok, err = pc_delete(r, args.inst_id)
+            print("OK: 删除成功" if ok else f"FAIL: {err}")
+        elif args.cmd == "pc-switch":
+            ok, err = pc_switch(r, args.inst_id, args.enable)
+            print("OK: 开关设置成功" if ok else f"FAIL: {err}")
+        else:
+            parser.print_help()
+            sys.exit(1)
+    except RuntimeError as e:
+        _log(f"    失败: {e}")
+        print(f"FAIL: {e}")
         sys.exit(1)
+
+    _step_done(t0)
+    _log(f"总耗时 {_elapsed(start_all)}")
 
 
 if __name__ == "__main__":
