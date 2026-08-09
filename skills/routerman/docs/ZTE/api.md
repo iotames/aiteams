@@ -105,6 +105,53 @@ IF_ModeSwitch=Advanced
 
 返回 `302`。不切换则无法访问应用功能接口。
 
+## 会话抢占（踢出其他登录用户）
+
+> 当另一台设备已登录（会话被占用）时，登录步骤 4 不再返回 302，
+> 而是返回 `200 OK` 的「其他用户正在设置设备」抢占页。
+> 需抢占（踢出）占用会话后才能完成登录。
+
+### 1. 检测占用会话
+
+```
+POST /
+Content-Type: application/x-www-form-urlencoded
+Check: <sha256(body)>
+Cookie: SID=...; _TESTCOOKIESUPPORT=1
+
+Username=admin&Password=<Password_enc>&action=login&Frm_Logintoken=&captchaCode=&_sessionTOKEN=<页面token>
+```
+
+- 被占用时响应 `HTTP/1.1 200 OK`（非 302），页面包含警告与占用会话列表。
+- 每个占用会话一个 radio，`name="preempt_sessid"`，label 为 `IP(用户名)`（HTML 数字实体）：
+
+```html
+<span id="login_warn_span">警告！其他用户正在设置设备！<br/>您可以选中某个用户，并点击"提交"强制其登出后再进行登录；<br/>或者点击"取消"，稍后再重试。</span>
+<div id="Level">
+  <p class="row"><input type="radio" id="radio1" name="preempt_sessid" value=0123abcd...ef />&nbsp;&nbsp;<label for="radio1">&#49;&#57;&#50;&#46;&#49;&#54;&#56;&#46;&#50;&#46;&#49;&#48;&#48;(&#97;&#100;&#109;&#105;&#110;)</label></p>
+</div>
+```
+
+- 提取所有 `preempt_sessid` 的 `value` 即为占用会话 ID。
+
+### 2. 抢占踢出会话（POST）
+
+```
+POST /
+Content-Type: application/x-www-form-urlencoded
+Check: <sha256(body)>
+Origin: http://192.168.2.1
+Referer: http://192.168.2.1/
+Cookie: SID=...; _TESTCOOKIESUPPORT=1
+
+preempt_sessid=<占用会话ID>&action=preempt
+```
+
+- `Check` 头仍为 `sha256(整个 body)`。
+- 成功：`HTTP/1.1 302 Moved Temporarily`，`Set-Cookie: SID=<新值>`，`Location: /`。
+- 踢出后需用新 SID 重新走完整登录流程（步骤 1-5）完成登录。
+- 取消抢占（不踢出）：`POST /`，body 为 `action=preempt_cancel`。
+
 ## 进入功能页面（获取会话令牌）
 
 ```
@@ -126,6 +173,47 @@ _sessionTmpToken = "\x38\x31\x39\x39..."  // 取最后一个
 |---|---|---|
 | 端口转发 | `Internet_PortForwarding_t.lp` | `/common_page/PortForwarding_lua.lua` |
 | 父母控制 | `Internet_Parent_Ctrl_t.lp` | `/common_page/ParentCtrl_lua.lua` |
+
+## 已关联设备 `/common_page/Query_AccessDevice_lua.lua`
+
+> 查询路由器已关联设备列表，用于获取父母控制 `ChildId` 所需的真实 MAC。
+> `ChildId` 必须是本接口返回的 MAC，虚拟 MAC 会校验失败（`IF_ERRORPARAM=ChildId`）。
+
+### 查询设备列表（GET）
+
+```
+GET /common_page/Query_AccessDevice_lua.lua?_=<当前时间戳毫秒>
+Cookie: SID=...; _TESTCOOKIESUPPORT=1
+X-Requested-With: XMLHttpRequest
+Accept: application/xml, text/xml, */*; q=0.01
+Referer: http://192.168.2.1/getpage.lua?pid=1002&nextpage=Internet_Parent_Ctrl_t.lp
+```
+
+注意：
+
+- `_` 查询参数必须是**当前毫秒时间戳**（浏览器防缓存用）；传 `?_=1` 这类小值会被当成非法请求返回 `SessionTimeout`。
+- `Referer` 需指向父母控制功能页（未进入功能页时指向首页亦可，但建议保持一致）。
+- 响应 `OBJ_LAN_ACCESS_ID` 下每 `<Instance>` 一台设备：
+
+| 字段 | 含义 | 示例 |
+|---|---|---|
+| `_LuQUID__InstID` | 设备实例 ID | `DEV.Hosts.LaninfoDevX` |
+| `_LuQUID_ConnectType` | 连接类型（0=有线，1=无线） | `1` |
+| `_LuQUID_AliasName` | 所属 SSID/端口 | `SSID5` / `LAN1` |
+| `_LuQUID_InterfaceID` | 接口 ID | `wlan5g0` / `eth1` |
+| `_LuQUID_Active` | 是否在线 | `1` / `0` |
+| `_LuQUID_IPAddress` | IPv4 地址 | `192.168.2.100` |
+| `_LuQUID_HostName` | 主机名 | `MyPhone` |
+| `_LuQUID_MACAddress` | **设备 MAC（父母控制 ChildId 取值）** | `xx:xx:xx:00:00:00` |
+| `_LuQUID_DevName` | 设备自定义名（可空） | `` |
+| `_LuQUID_IPV6Address` | IPv6 地址 | `240e:...` |
+| `_LuQUID_InterfaceType` | 接口类型 | `3` |
+| `_LuQUID_InternetAccess` | 上网控制状态 | `2` |
+| `_LuQUID_Band` | 频段 | `5G` / `2.4G` / 空 |
+| `_LuQUID_DevMeshType` | 组网类型 | `1` |
+| `_LuQUID_Interface` | 接口名 | `wlan5g0` |
+
+注意：本接口仅返回**当前在线**设备；已配置父母控制但当前离线的设备不会出现。
 
 ## 通用提交规则
 

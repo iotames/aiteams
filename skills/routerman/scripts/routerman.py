@@ -6,11 +6,13 @@
 """
 import argparse
 import hashlib
+import html
 import os
 import re
 import subprocess
 import sys
 import tempfile
+import time
 
 BASE = "http://192.168.2.1"
 UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -109,6 +111,47 @@ def _error_info(xml):
     return False, detail
 
 
+class PreemptRequired(RuntimeError):
+    """登录时发现其他用户正在设置设备，需要先抢占(踢出)其会话。
+
+    Attributes:
+        sessions: 在线会话列表，每项含 sessid / label / ip / user。
+    """
+
+    def __init__(self, sessions):
+        self.sessions = sessions
+        msg = "其他用户正在设置设备，需抢占会话: " + "、".join(
+            f"{s.get('ip', '?')}({s.get('user', '?')})" for s in sessions
+        )
+        super().__init__(msg)
+
+
+def parse_preempt_sessions(page):
+    """从登录返回的抢占页 HTML 中解析在线会话列表。
+
+    抢占页特征：`<div id="Level">` 内每个会话一个 radio，
+    `name="preempt_sessid" value=<sessid>`，label 为 `IP(用户名)`。
+    非抢占页返回 None。
+    """
+    block = re.search(r'<div id="Level">(.*?)</div>', page, re.S)
+    if not block:
+        return None
+    inner = block.group(1)
+    if "preempt_sessid" not in inner:
+        return None
+    sessions = []
+    radios = re.findall(
+        r'<input[^>]*name="preempt_sessid"[^>]*value="?([0-9a-fA-F]+)"?', inner
+    )
+    labels = re.findall(r'<label[^>]*>([^<]*)</label>', inner)
+    for i, sid in enumerate(radios):
+        label = html.unescape(labels[i]) if i < len(labels) else ""
+        m = re.match(r"^(.+?)\((.+)\)$", label)
+        ip, user = m.groups() if m else (label, "")
+        sessions.append({"sessid": sid, "label": label, "ip": ip, "user": user})
+    return sessions or None
+
+
 class Router:
     """ZTE 路由器 HTTP API 客户端。"""
 
@@ -147,35 +190,74 @@ class Router:
         return hdr, body
 
     # ---------- 登录流程 ----------
-    def login(self):
-        """完整登录流程，成功返回 SID。"""
-        # 1. 首页拿 SID
+    def _login_request(self):
+        """登录步骤 1-4：访问首页拿 SID、logintoken、提取页面 token、提交登录。
+        返回 (响应头, 响应体)。"""
         hdr, _ = self.get("/")
         if "SID" not in self.cookies:
             raise RuntimeError("访问首页未获取到 SID")
-        # 2. logintoken
         hdr, body = self.get(
             "/function_module/login_module/login_page/logintoken_lua.lua",
             {"X-Requested-With": "XMLHttpRequest"},
         )
         m = re.search(r"<ajax_response_xml_root>([^<]*)</ajax_response_xml_root>", body)
         xml_obj = m.group(1) if m else ""
-        # 3. 登录页 _sessionTOKEN
         hdr, page = self.get("/")
         m = re.search(r'name="_sessionTOKEN"[^>]*value="([^"]*)"', page)
         stoken = m.group(1) if m else ""
-        # 4. 登录
         penc = sha256(self.cfg["ROUTER_LOGIN_PASSWORD"] + xml_obj)
         lbody = (
             f"Username={self.cfg['ROUTER_LOGIN_USER']}&Password={penc}"
             f"&action=login&Frm_Logintoken=&captchaCode=&_sessionTOKEN={stoken}"
         )
         hdr, body = self.post("/", lbody, {"Origin": self.base, "Referer": self.base + "/"})
+        return hdr, body
+
+    def _switch_advanced(self):
+        """步骤 5：切换高级模式。"""
+        self.post("/", "IF_ModeSwitch=Advanced",
+                  {"Origin": self.base, "Referer": self.base + "/"})
+
+    def login(self, auto_preempt=False):
+        """完整登录流程，成功返回 SID。
+
+        auto_preempt=True 时，若检测到其他用户占用，自动抢占踢出全部占用会话后继续登录；
+        否则检测到占用时抛出 PreemptRequired（含会话列表）。
+        """
+        hdr, body = self._login_request()
+        first = hdr.splitlines()[0]
+        if "302" in first:
+            self._switch_advanced()
+            return self.cookies.get("SID")
+        sessions = parse_preempt_sessions(body)
+        if not sessions:
+            raise RuntimeError(f"登录失败: {first}\n{body[:300]}")
+        if not auto_preempt:
+            raise PreemptRequired(sessions)
+        for s in sessions:
+            self.preempt_kick(s["sessid"])
+        return self.login(auto_preempt=True)
+
+    def detect_preempt(self):
+        """执行登录请求，检测是否被其他用户占用。
+
+        返回：占用会话列表（未占用返回 None）。仅探测，不切换高级模式。
+        """
+        hdr, body = self._login_request()
+        if "302" in hdr.splitlines()[0]:
+            return None
+        return parse_preempt_sessions(body)
+
+    def preempt_kick(self, sessid):
+        """抢占踢出指定会话（POST preempt_sessid + action=preempt）。返回新 SID。
+
+        需先通过 _login_request / detect_preempt 触发抢占页拿到 sessid。
+        """
+        body = f"preempt_sessid={sessid}&action=preempt"
+        hdr, _ = self.post("/", body, {"Origin": self.base, "Referer": self.base + "/"})
         first = hdr.splitlines()[0]
         if "302" not in first:
-            raise RuntimeError(f"登录失败: {first}\n{body[:300]}")
-        # 5. 切高级模式
-        self.post("/", "IF_ModeSwitch=Advanced", {"Origin": self.base, "Referer": self.base + "/"})
+            raise RuntimeError(f"抢占踢出失败: {first}")
         return self.cookies.get("SID")
 
     # ---------- 功能页面 ----------
@@ -212,6 +294,38 @@ class Router:
         if self.session_token:
             body += "&_sessionTOKEN=" + self.session_token
         return self.post(lua_path, body, {"Referer": self.base + referer, "X-Requested-With": "XMLHttpRequest"})
+
+
+# ==================== 已关联设备 ====================
+
+def device_list(r):
+    """查询路由器已关联设备列表（含 MAC 地址）。
+
+    用于父母控制新增前获取已关联设备的 MAC：ChildId 必须是
+    该列表中的 MAC，虚拟 MAC 会校验失败。
+
+    返回字段（去掉 _LuQUID_ 前缀）：
+      _InstID, ConnectType, AliasName, InterfaceID, Active,
+      IPAddress, HostName, MACAddress, DevName, IPV6Address,
+      InterfaceType, InternetAccess, Band, DevMeshType, Interface
+    """
+    ts = int(time.time() * 1000)
+    hdr, body = r.get(
+        "/common_page/Query_AccessDevice_lua.lua?_=" + str(ts),
+        {"Referer": self_ref(r), "X-Requested-With": "XMLHttpRequest",
+         "Accept": "application/xml, text/xml, */*; q=0.01"},
+    )
+    items = []
+    m = re.search(r"<OBJ_LAN_ACCESS_ID>(.*?)</OBJ_LAN_ACCESS_ID>", body, re.S)
+    if m:
+        for inst in re.findall(r"<Instance>(.*?)</Instance>", m.group(1), re.S):
+            d = dict(re.findall(r"<ParaName>([^<]*)</ParaName><ParaValue>([^<]*)</ParaValue>", inst))
+            items.append({k.replace("_LuQUID_", ""): v for k, v in d.items()})
+    return items
+
+
+def self_ref(r):
+    return r.base + "/getpage.lua?pid=1002&nextpage=Internet_Parent_Ctrl_t.lp"
 
 
 # ==================== 端口转发 ====================
@@ -366,6 +480,14 @@ def main():
     # 登录
     sub.add_parser("login", help="登录并输出 SID")
 
+    # 会话抢占（踢出其他登录用户）
+    sub.add_parser("kick-list", help="检测是否被其他用户占用，列出占用会话")
+    p_kick = sub.add_parser("kick", help="抢占踢出占用会话并登录（默认踢全部）")
+    p_kick.add_argument("--sessid", help="仅踢出指定会话（可省略，默认踢全部占用会话）")
+
+    # 已关联设备
+    sub.add_parser("dev-list", help="已关联设备列表（含 MAC，供父母控制使用）")
+
     # 端口转发
     p_pf = sub.add_parser("pf-list", help="端口转发列表")
     p_pf_add = sub.add_parser("pf-add", help="端口转发新增")
@@ -425,7 +547,52 @@ def main():
 
     cfg = load_config(args.env)
     r = Router(cfg)
-    r.login()
+
+    # kick-list：只检测，不登录
+    if args.cmd == "kick-list":
+        try:
+            sessions = r.detect_preempt()
+        except RuntimeError as e:
+            print(f"FAIL: {e}")
+            sys.exit(1)
+        if not sessions:
+            print("无其他用户占用，登录正常")
+            return
+        print(f"检测到 {len(sessions)} 个占用会话:")
+        for s in sessions:
+            print(f"  sessid={s['sessid']}  {s['label']}")
+        return
+
+    # kick：抢占踢出后登录
+    if args.cmd == "kick":
+        try:
+            if args.sessid:
+                sessions = r.detect_preempt() or []
+                if not sessions:
+                    r.login()
+                    print("无其他用户占用，登录正常")
+                    return
+                if not any(s["sessid"] == args.sessid for s in sessions):
+                    print(f"FAIL: 指定会话 {args.sessid} 不在占用列表:")
+                    for s in sessions:
+                        print(f"  sessid={s['sessid']}  {s['label']}")
+                    sys.exit(1)
+                r.preempt_kick(args.sessid)
+                sid = r.login()
+                print(f"OK: 已踢出 {args.sessid[:16]}... 并登录，SID: {sid[:16]}...")
+            else:
+                sid = r.login(auto_preempt=True)
+                print(f"OK: 抢占成功，已登录 SID: {sid[:16]}...")
+        except PreemptRequired as e:
+            print("FAIL: 仍有会话占用:", e)
+            print("可执行 kick-list 查看，或 kick --sessid <id> 指定踢出")
+            sys.exit(1)
+        except RuntimeError as e:
+            print(f"FAIL: {e}")
+            sys.exit(1)
+        return
+
+    r.login(auto_preempt=False)
     print(f"登录成功 SID: {r.cookies['SID'][:16]}...", file=sys.stderr)
 
     feature = None
@@ -438,6 +605,8 @@ def main():
 
     if args.cmd == "login":
         return
+    elif args.cmd == "dev-list":
+        _print_items(device_list(r))
     elif args.cmd == "pf-list":
         _print_items(pf_list(r))
     elif args.cmd == "pf-add":

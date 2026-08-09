@@ -20,6 +20,7 @@
 import argparse
 import os
 import random
+import re
 import sys
 import time
 
@@ -30,6 +31,7 @@ sys.path.insert(0, SCRIPTS_DIR)
 from routerman import (  # noqa: E402
     Router,
     load_config,
+    device_list,
     pf_apply,
     pf_delete,
     pf_list,
@@ -122,6 +124,33 @@ def t_pc_list(r):
             if k not in it:
                 return "FAIL", f"规则 {it.get('_InstID', '?')} 缺少字段 {k}"
     return "PASS", f"共 {len(items)} 条规则，字段完整"
+
+
+def t_dev_list(r):
+    items = device_list(r)
+    required = ("_InstID", "MACAddress", "IPAddress", "HostName", "Active", "Interface")
+    if not items:
+        return "FAIL", "未获取到任何已关联设备"
+    for it in items:
+        for k in required:
+            if k not in it:
+                return "FAIL", f"设备 {it.get('_InstID', '?')} 缺少字段 {k}"
+        if not it["MACAddress"]:
+            return "FAIL", f"设备 {it.get('_InstID', '?')} MAC 为空"
+    return "PASS", f"共 {len(items)} 台设备，MAC/IP 字段完整"
+
+
+def t_preempt_detect(r):
+    """只读探测：检测是否被其他用户占用。不踢出（避免影响他人会话）。"""
+    sessions = r.detect_preempt()
+    if sessions is None:
+        return "PASS", "无其他用户占用，登录正常"
+    for s in sessions:
+        if not all(k in s for k in ("sessid", "label", "ip", "user")):
+            return "FAIL", f"占用会话字段不完整: {s}"
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", s["sessid"]):
+            return "FAIL", f"sessid 格式异常: {s['sessid']}"
+    return "PASS", f"检测到 {len(sessions)} 个占用会话（仅探测，未踢出）"
 
 
 def _free_pf_ports(items, count=2):
@@ -220,7 +249,15 @@ def t_pc_lifecycle(r, cfg, pc_mac, ts):
             if it.get("ChildId"):
                 pc_mac = it["ChildId"]
                 break
-        if not pc_mac:
+    if not pc_mac:
+        devs = device_list(r)
+        for d in devs:
+            if d.get("MACAddress"):
+                pc_mac = d["MACAddress"]
+                break
+        if pc_mac:
+            print(f"        ^ 从已关联设备列表取测试 MAC: {pc_mac}")
+        else:
             return "SKIP", "无现有父母控制规则可用的已关联 MAC，可用 --pc-mac 指定后重跑"
     name = f"SkillTest_{ts}"
 
@@ -305,6 +342,8 @@ def main():
     cases = [
         ("配置加载", t_config, (args.env,)),
         ("登录", t_login, ()),
+        ("已关联设备列表(只读)", t_dev_list, ()),
+        ("会话占用探测(只读)", t_preempt_detect, ()),
         ("端口转发列表(只读)", t_pf_list, ()),
         ("父母控制列表(只读)", t_pc_list, ()),
         ("端口转发 增改还原开关删", t_pf_lifecycle, (cfg, args.pf_client, ts)),

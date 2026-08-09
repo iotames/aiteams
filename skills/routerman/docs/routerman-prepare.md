@@ -107,6 +107,70 @@ Referer: http://192.168.2.1/
 | 端口转发 | `Internet_PortForwarding_t.lp` | `getpage.lua?pid=1002&nextpage=Internet_PortForwarding_t.lp` |
 | 父母控制 | `Internet_Parent_Ctrl_t.lp` | `getpage.lua?pid=1002&nextpage=Internet_Parent_Ctrl_t.lp` |
 
+## 已关联设备 `/common_page/Query_AccessDevice_lua.lua`（已验证）
+
+> 用于获取父母控制 `ChildId` 所需的真实 MAC。
+
+### 查询设备列表（GET）
+
+```
+GET /common_page/Query_AccessDevice_lua.lua?_=<当前毫秒时间戳>
+Cookie: SID=...; _TESTCOOKIESUPPORT=1
+X-Requested-With: XMLHttpRequest
+Accept: application/xml, text/xml, */*; q=0.01
+Referer: http://192.168.2.1/getpage.lua?pid=1002&nextpage=Internet_Parent_Ctrl_t.lp
+```
+
+关键点：
+
+- `_` 查询参数必须是当前毫秒时间戳（防缓存）。实测 `?_=1`/`?_=123` 这类小值返回 `SessionTimeout`，真实时间戳正常。
+- 响应 `OBJ_LAN_ACCESS_ID` 下每 `<Instance>` 一台设备，字段带 `_LuQUID_` 前缀，关键字段：
+  `_LuQUID_MACAddress`（设备 MAC）、`_LuQUID_HostName`、`_LuQUID_IPAddress`、`_LuQUID_Active`、`_LuQUID_Band`、`_LuQUID_Interface`。
+- 仅返回当前在线设备；已配父母控制但离线的设备不会出现。
+
+## 会话抢占（踢出其他登录用户）（已验证）
+
+> 场景：另一台设备已登录路由器后台，本机再登录时返回「警告！其他用户正在设置设备！」抢占页，
+> 无法正常登录。需抢占（踢出）占用会话。
+
+### 登录被占用时的响应特征
+
+- 正常登录 `POST /`（Username/Password/action=login）返回 `302 Moved Temporarily`。
+- 被占用时返回 `HTTP/1.1 200 OK`，页面含 `login_warn_span` 警告与 `<div id="Level">` 内的占用会话 radio 列表：
+
+```html
+<span id="login_warn_span">警告！其他用户正在设置设备！<br/>您可以选中某个用户，并点击"提交"强制其登出后再进行登录；<br/>或者点击"取消"，稍后再重试。</span>
+<div id="Level">
+  <p class="row"><input type="radio" id="radio1" name="preempt_sessid" value=<64位hex> />&nbsp;&nbsp;<label for="radio1">IP(用户名)</label></p>
+</div>
+```
+
+- label 为 HTML 数字实体编码的 `IP(用户名)`，如 `&#49;&#57;&#50;...(&#97;&#100;&#109;&#105;&#110;)` = `192.168.2.100(admin)`。
+
+### 抢占踢出（POST）
+
+```
+POST /
+Content-Type: application/x-www-form-urlencoded
+Check: <sha256(body)>
+Cookie: SID=...; _TESTCOOKIESUPPORT=1
+
+preempt_sessid=<占用会话ID>&action=preempt
+```
+
+- 成功：`HTTP/1.1 302 Moved Temporarily`，`Set-Cookie: SID=<新值>`，`Location: /`。
+- 踢出后需重新走完整登录流程完成登录。
+- 取消抢占：body 为 `action=preempt_cancel`。
+
+### CLI 封装验证（✅ 实测通过）
+
+| 命令 | 场景 | 结果 |
+|---|---|---|
+| `routerman.py kick-list` | 无占用 | ✅ 输出「无其他用户占用，登录正常」 |
+| `routerman.py kick-list` | 192.168.2.100 已登录 | ✅ 列出占用会话 sessid + `192.168.2.100(admin)` |
+| `routerman.py kick` | 192.168.2.100 已登录 | ✅ 抢占成功并登录，新 SID |
+| 踢出后 `kick-list` | — | ✅ 无占用，登录正常 |
+
 ## 接口调用通用规则（已验证）
 
 - 认证方式：Cookie `SID`（登录时下发的值；每次登录会更新）
@@ -221,7 +285,9 @@ IF_ACTION=Delete&Name=<名称>&ChildId=<MAC>&_InstID=<实例ID>&_sessionTOKEN=<t
 | 功能 | 操作 | 结果 |
 |---|---|---|
 | 登录 | 完整登录流程 | ✅ 302 + 新 SID |
-| 端口转发 | 查询列表 | ✅ 7 条规则 |
+| 已关联设备 | 查询设备列表（含 MAC） | ✅ 14 台设备 |
+| 会话抢占 | kick-list 检测占用 | ✅ 列出占用会话 |
+| 会话抢占 | kick 踢出占用并登录 | ✅ 踢出后登录正常 |
 | 端口转发 | 新增 `DEV.NAT.PtMappingX` | ✅ |
 | 端口转发 | 修改端口 2222→2223 | ✅ |
 | 端口转发 | 删除 | ✅ |
@@ -251,6 +317,9 @@ skills/routerman/
 
 | 命令 | 结果 |
 |---|---|
+| `routerman.py dev-list` | ✅ 列出 14 台在线设备及 MAC |
+| `routerman.py kick-list` | ✅ 无占用提示 / 有占用列出会话 |
+| `routerman.py kick` | ✅ 踢出占用并登录 |
 | `routerman.py pf-list` | ✅ 列出 7 条规则 |
 | `routerman.py pc-list` | ✅ 列出 4 条规则 |
 | `routerman.py pf-add`（`SkillTest`） | ✅ 新增 `DEV.NAT.PtMappingX` |
@@ -266,6 +335,9 @@ skills/routerman/
 
 1. 登录的 `Check` 头 = `sha256(POST body)`，`Password_enc = sha256(密码 + xmlObj)`。
 2. `_sessionTmpToken` 取功能页 HTML 中最后一次 `\xNN` 转义赋值，需反转义。
-3. 父母控制的 `ChildId` MAC 必须是路由器已关联设备的 MAC。
+3. 父母控制的 `ChildId` MAC 必须是路由器已关联设备的 MAC，用 `dev-list` 获取。
 4. 提交字段名要去掉 HTML id 后缀（`colonStripping`），如 `Name:ParentCtrl` → `Name`。
+5. `Query_AccessDevice_lua.lua` 的 `_` 查询参数必须是当前毫秒时间戳，小值会返回 `SessionTimeout`。
+6. 登录被占用时返回 200 抢占页而非 302；抢占踢出为 `POST preempt_sessid=<sid>&action=preempt`，成功返回 302 + 新 SID。
+7. 抢占页 label 为 HTML 数字实体编码的 `IP(用户名)`，用 `html.unescape` 解码。`kick` 会强制登出其他设备，操作前确认目标。
 

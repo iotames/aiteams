@@ -3,15 +3,15 @@ name: routerman
 description: >-
   登录 ZTE 路由器管理后台并执行常用管理操作。当用户提到"路由器"、"管理后台"、"端口转发"、
   "父母控制"、"家长控制"、"端口映射"、"开端口"、"限制上网"、"URL黑名单/白名单"、
-  或要求读取/修改路由器配置时务必使用此技能。可直接通过 HTTP API 完成登录与配置修改，
-  无需浏览器自动化。如 HTTP 方式失败，再回退到 chromedp 技能。
+  "无法登录"、"被占用"、"踢出登录"、"抢占登录"、或要求读取/修改路由器配置时务必使用此技能。
+  可直接通过 HTTP API 完成登录与配置修改，无需浏览器自动化。如 HTTP 方式失败，再回退到 chromedp 技能。
 metadata:
-  version: 1.0.0
+  version: 1.1.0
 ---
 
 # routerman — ZTE 路由器常用管理操作
 
-通过 HTTP API 直接操作 ZTE 路由器管理后台。支持登录、端口转发与父母控制两项功能的增删改查。
+通过 HTTP API 直接操作 ZTE 路由器管理后台。支持登录、会话抢占（踢出其他登录用户）、端口转发与父母控制等功能的增删改查。
 
 ## 环境要求
 
@@ -32,6 +32,9 @@ metadata:
 ## 快速开始
 
 ```bash
+# 查询已关联设备列表（含 MAC）
+python3 <技能目录>/scripts/routerman.py --env .env dev-list
+
 # 查询端口转发列表
 python3 <技能目录>/scripts/routerman.py --env .env pf-list
 
@@ -50,6 +53,43 @@ python3 <技能目录>/scripts/routerman.py --env .env login
 ```
 
 输出当前登录 SID（前 16 位）。如需把 SID 写入 `.env` 的 `ROUTER_TOKEN`，见下文「获取 ROUTER_TOKEN」。
+
+### 会话抢占（踢出其他登录用户）
+
+> 当另一台设备已登录路由器后台时，本机登录会返回「警告！其他用户正在设置设备！」的抢占页，
+> 导致无法登录。使用 `kick-list` 检测占用会话，`kick` 强制踢出后登录。
+
+| 命令 | 功能 | 示例 |
+|---|---|---|
+| `kick-list` | 检测是否被其他用户占用，列出占用会话 | `kick-list` |
+| `kick` | 抢占踢出全部占用会话并登录 | `kick` |
+| `kick --sessid <id>` | 仅踢出指定会话并登录 | `kick --sessid <会话SID>` |
+
+```bash
+# 1. 检测是否有其他用户占用（占用时输出 IP(用户名) 与 sessid）
+python3 <技能目录>/scripts/routerman.py --env .env kick-list
+# 无占用：无其他用户占用，登录正常
+# 有占用：检测到 1 个占用会话: sessid=abcd...  192.168.2.100(admin)
+
+# 2a. 踢出全部占用会话并登录
+python3 <技能目录>/scripts/routerman.py --env .env kick
+
+# 2b. 仅踢出指定会话并登录
+python3 <技能目录>/scripts/routerman.py --env .env kick --sessid 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+```
+
+> 注意：`kick` 会强制登出其他设备上已登录的账号（抢占其会话），操作前确认目标会话。
+
+### 已关联设备
+
+| 命令 | 功能 | 示例 |
+|---|---|---|
+| `dev-list` | 查询已关联设备列表（含 MAC） | `dev-list` |
+
+返回每台设备：`_InstID`、`HostName`、`MACAddress`、`IPAddress`、`Band`、`Interface` 等。
+
+> **父母控制新增前先查 MAC**：`pc-add` 的 `--mac` 必须是 `dev-list` 返回的真实设备 MAC，
+> 虚拟 MAC 会返回 `IF_ERRORPARAM=ChildId` 校验失败。
 
 ### 端口转发
 
@@ -83,16 +123,20 @@ python3 <技能目录>/scripts/routerman.py --env .env login
 参数：
 
 - `--name`：规则名称（1~32 字符）
-- `--mac`：设备 MAC，**必须是路由器已关联设备的 MAC**（虚拟 MAC 会校验失败）
+- `--mac`：设备 MAC，**必须是 `dev-list` 返回的已关联设备 MAC**（虚拟 MAC 会校验失败）
 - `--week`：周历十进制值（每天=`127`；位顺序 Su Mo Tu We Th Fr Sa）
 - `--start` / `--end`：时间段，格式 `时:分`（如 `8:0`、`20:30`）
 - `--mode`：`NotAllowed`（不允许上网）/ `BlackList`（URL黑名单）/ `WhiteList`（URL白名单）
 - `--url`：URL 规则（黑/白名单模式可重复传多个）
 - `--enable`：`1` 开启 / `0` 关闭
 
-URL 黑名单示例：
+先查 MAC 再新增示例：
 
 ```bash
+# 1. 列出在线设备，找到目标设备的 MACAddress
+python3 <技能目录>/scripts/routerman.py --env .env dev-list
+
+# 2. 用真实 MAC 新增规则
 python3 <技能目录>/scripts/routerman.py --env .env pc-add \
   --name 测试黑名单 --mac xx:xx:xx:00:00:00 \
   --start 8:0 --end 20:0 --mode BlackList --url http://example.com
@@ -105,11 +149,14 @@ python3 <技能目录>/scripts/routerman.py --env .env pc-add \
 ```python
 import sys
 sys.path.insert(0, "<技能目录>/scripts")
-from routerman import Router, load_config, pf_list, pf_apply, pc_apply, pc_list
+from routerman import Router, load_config, device_list, pf_list, pf_apply, pc_apply, pc_list
 
 cfg = load_config(".env")
 r = Router(cfg)
 r.login()
+
+# 已关联设备
+devices = device_list(r)              # 查询已关联设备列表（含 MAC）
 
 # 端口转发
 items = pf_list(r)                    # 查询列表
@@ -123,10 +170,14 @@ ok, err = pf_apply(r, "SSH", "TCP", "192.168.2.10x", 2222, internal_port=22)
 ### 关键函数
 
 | 函数 | 说明 |
-|---|---|
+|---|---|---|
 | `Router(cfg)` | 客户端，`cfg` 为 `load_config` 返回的 dict |
-| `Router.login()` | 完整登录，成功返回 SID |
+| `Router.login(auto_preempt=False)` | 完整登录，成功返回 SID；检测到占用时抛 `PreemptRequired`，`auto_preempt=True` 自动踢出全部占用会话 |
+| `Router.detect_preempt()` | 探测是否被其他用户占用；返回占用会话列表（未占用返回 None） |
+| `Router.preempt_kick(sessid)` | 抢占踢出指定会话（`preempt_sessid` + `action=preempt`） |
+| `PreemptRequired.sessions` | 抢占异常携带的会话列表，每项含 `sessid` / `label` / `ip` / `user` |
 | `Router.enter_feature(feature)` | 进入功能页并提取会话 token；`feature` 为 `portforwarding` 或 `parentctrl` |
+| `device_list(r)` | 已关联设备列表（含 MAC，父母控制 `ChildId` 取值来源） |
 | `pf_list(r)` | 端口转发列表 |
 | `pf_apply(r, alias, protocol, internal_client, external_port, internal_port=None, enable=1, inst_id="-1")` | 端口转发新增/修改 |
 | `pf_delete(r, inst_id, ...)` | 端口转发删除 |
@@ -154,12 +205,14 @@ python3 <技能目录>/scripts/routerman.py --env .env login
 | 现象 | 原因 | 解决 |
 |---|---|---|
 | 返回 `SessionTimeout` | 使用了登录前的旧 SID | 重新运行脚本（每次自动重新登录） |
-| 父母控制新增报 `IF_ERRORPARAM=ChildId` | MAC 非路由器已关联设备 | 先用 `pc-list` 查看已有关联 MAC，或用浏览器"从已关联设备中选择" |
+| 登录返回「其他用户正在设置设备」 | 另一设备已登录，占用会话 | `kick-list` 检测后 `kick` 踢出占用会话再登录 |
+| `dev-list` 返回 `SessionTimeout` | `_` 查询参数不是当前毫秒时间戳 | 脚本已自动带时间戳；手动 curl 时用 `?_=$(date +%s%3N)` |
+| 父母控制新增报 `IF_ERRORPARAM=ChildId` | MAC 非路由器已关联设备 | 先用 `dev-list` 查在线设备 MAC，或用浏览器"从已关联设备中选择" |
 | `Check` 校验失败 | `Check` 头与 body 不匹配 | 确认 body 未变，`Check=sha256(body)` |
 
 ## 参考文档
 
-- `docs/ZTE/api.md` — 完整 HTTP 接口文档（登录、端口转发、父母控制字段与请求示例）
+- `docs/ZTE/api.md` — 完整 HTTP 接口文档（登录、已关联设备、端口转发、父母控制字段与请求示例）
 - `references/` — 预留扩展
 
 ## 回退策略
