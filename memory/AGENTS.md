@@ -9,11 +9,24 @@
 1. **简明扼要**：写入新记忆条目时，文字精简可落地，去掉不可执行的解释。元数据只保留 `type`，不记录会话 ID。
 2. **禁止重复**：写入新记忆条目前，先读一遍现有内容，存在语义重复则改/合/跳过，不盲目追加。
 
+## 离线脚本优先，禁止偷跑 Token
+
+**任何消耗 tokens 的定时任务、后台任务、心跳、cron 等，一律禁止！**
+
+1. 写好代码跑任务，稳定性和确定性均占优，且不泄露隐私给LLM模型，故代码优先。
+2. 所有自动化任务，优先选择**不调 LLM 的纯脚本方案**（bash、cron + shell 等），除非用户明确批准。
+
+## 代码规范
+
+1. 除非一次性临时任务，否则避免硬编码。脚本路径基于当前位置推导，绝不硬编码绝对路径！因为会丧失可移植性。
+
 ## 工作流规则
 
 1. **提交须经确认**: 用户没明确说"提交/commit"，绝不执行 git 写入操作。
 2. **文档同步**：修改代码后同步更新相关 .md 文档（README.md、CLAUDE.md、USAGE.md 等）。
 3. **先问再写**：任务存在歧义时，先提问澄清再执行。复杂任务先出方案，认可后实施。
+4. **工程化优先于取悦用户**：代码和命令行操作，以符合工程化最佳实践为准。用户提出不合工程规范的需求，必须主动提出建议和理由，而非盲目执行。
+5. **正面回答优先**：用户明确提问时，优先正面回答，不得绕过问题去做别的操作。
 
 **Git提交前强制自查步骤**（每次 commit 前必须执行）：
 1. 提交Git之前，用 `git status`, `git diff --stat`, `git diff` 对全部待提交的代码进行没有上下文目标意图污染的独立窗口审核，有问题直接阻止。
@@ -24,20 +37,11 @@
 
 1. 禁止用 npx 探测本地软件，要用 `where` 或 `cmd /c` 查。
 
-## 中国大陆网络环境与网络资源获取
+## 中国大陆网络环境
 
 - 用户位于中国大陆境内，境外网络资源连接不稳定或可能被阻断（如 developers.openai.com 等境外站点可能 403/不可达）。
 - **优先用国内镜像**：获取依赖、文档、资源时优先使用国内镜像（npm/cargo/pip/go/GitHub 等），只有国内镜像报错后才切换国际中心仓库。
 - 确需外网时，先询问用户是否有可用网络代理（如 127.0.0.1:7897），不要反复盲目重试境外直连。
-
-## Windows Markdown 转 PDF 流程
-
-1. Python `markdown` 库转 HTML → Edge headless 打印为 PDF。不要用 npm/puppeteer/weasyprint/pandoc（此机器 npm 有 EBUSY 问题，weasyprint 缺 GTK 系统库）。
-2. Edge 参数必带 `--print-to-pdf-no-header --no-margins` 以禁止默认页头页脚（时间戳、文件路径）。
-3. 隐私要求：转换后用 pypdf 剥离元数据（`writer.metadata = None`），页头页脚绝不能包含时间、文件路径等隐私信息。页头仅保留文件名，页脚仅保留页码。
-4. CSS 限制须知：`@page` margin boxes 不生效，`position: fixed` 被 Edge headless 剥离。页头/页脚需用独立 Edge 实例逐页生成（`position: absolute` + mm 坐标定位），再用 pypdf `merge_page(over=True)` 合并。
-5. fpdf2 与 pypdf 合并时 TrueType 字体会触发 `MERG NOT subset` 警告，导致水印文字丢失。改用 Edge 生成水印页可避免此问题。
-6. 用 Python `subprocess` 调 Edge 时，路径为 `C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe`，HTML 路径需转换为 `file:///` URL。
 
 ## 子 Agent 工作透明
 
@@ -59,4 +63,13 @@
 ## 用户隐私和数据安全
 
 - 除非用户同意，LLM大语言模型的输入tokens不能包含敏感数据。例如，不写执行后，可能暴露隐私风险的程序和脚本，让大模型作为输入的读取。隐私数据仅在本地流转，不能出外网。
-- 所有文件，包括但不仅限于：代码，各种注释，各种文档，隐私数据都应脱敏处理。代码尽量避免硬编码。
+- 所有文件，包括但不仅限于：代码，各种注释，各种文档，隐私数据都应脱敏处理。
+
+## Windows Markdown 转 PDF 流程
+
+1. Python `markdown` 库转 HTML → Edge headless 打印为 PDF。不要用 npm/puppeteer/weasyprint/pandoc（此机器 npm 有 EBUSY 问题，weasyprint 缺 GTK 系统库）。
+2. Edge 参数必带 `--print-to-pdf-no-header --no-margins` 以禁止默认页头页脚（时间戳、文件路径）。
+3. 隐私要求：转换后用 pypdf 剥离元数据（`writer.metadata = None`），页头页脚绝不能包含时间、文件路径等隐私信息。页头仅保留文件名，页脚仅保留页码。
+4. CSS 限制须知：`@page` margin boxes 不生效，`position: fixed` 被 Edge headless 剥离。页头/页脚需用独立 Edge 实例逐页生成（`position: absolute` + mm 坐标定位），再用 pypdf `merge_page(over=True)` 合并。
+5. fpdf2 与 pypdf 合并时 TrueType 字体会触发 `MERG NOT subset` 警告，导致水印文字丢失。改用 Edge 生成水印页可避免此问题。
+6. 用 Python `subprocess` 调 Edge 时，招不到 msedge.exe 浏览器路径，要主动询问用户。
