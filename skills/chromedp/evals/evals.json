@@ -62,6 +62,19 @@
         "用 query_selector 读取结果区文本并汇报",
         "用 get_console_errors 确认交互过程无新增 JS 错误"
       ]
+    },
+    {
+      "id": 6,
+      "prompt": "把本地 HTML 报告打印成 PDF，要求 A4 纸、四周 18mm 边距、页头显示文件名、页脚显示页码，并校验产物不含 file:// 路径与时间戳。",
+      "expected_output": "启动 headless Chrome → 连接 CDP → 等待页面加载 → print_to_pdf 生成 PDF → pypdf 校验边距/页眉页脚/无隐私信息 → 汇报文件路径",
+      "files": [],
+      "expectations": [
+        "用 chromedp_launch + CDPClient 连接目标页",
+        "先 wait_for_navigation 再调用 print_to_pdf",
+        "使用毫米单位的纸张与边距参数（A4：210×297mm）",
+        "页眉模板仅含文件名，页脚模板含 pageNumber/totalPages",
+        "用 pypdf 校验元数据为空、内容不含 file:// 与时间戳"
+      ]
     }
   ]
 }

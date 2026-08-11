@@ -6,10 +6,10 @@
 
 ## 记忆文件和上下文
 
-1. **简明扼要**：写入新记忆条目时，文字精简可落地，去掉不可执行的解释。元数据只保留 `type`，不记录会话 ID。
+1. **简明扼要（非常重要）**：上下文过长会稀释关键指令，导致忽略或执行偏差。记忆和指令只保留可落地要点，写前自检长度，能短则短。元数据只保留 `type`，不记录会话 ID。
 2. **禁止重复**：写入新记忆条目前，先读一遍现有内容，存在语义重复则改/合/跳过，不盲目追加。
 3. **自动触发**：用户输入包含 `记住`, `不要忘`, `以后`, `凡是` 等关键词时，都要判断是否存在更新记忆文件的意图。确认则写入更新，否则向人类询问。
-3. **判断记忆作用范围**：新增记忆时，先判断其作用范围。除非和项目强相关，推荐记忆到全局。不确定要提问。
+4. **判断记忆作用范围**：新增记忆时，先判断其作用范围。除非和项目强相关，推荐记忆到全局。不确定要提问。
 
 ## 离线脚本优先，禁止偷跑 Token
 
@@ -59,14 +59,15 @@
 - 除非用户同意，LLM大语言模型的输入tokens不能包含敏感数据。例如，不写执行后，可能暴露隐私风险的程序和脚本，让大模型作为输入的读取。隐私数据仅在本地流转，不能出外网。
 - 所有文件，包括但不仅限于：代码，各种注释，各种文档，隐私数据都应脱敏处理。
 
-## Windows Markdown 转 PDF 流程
+## Markdown 转 PDF
 
-1. Python `markdown` 库转 HTML → Edge headless 打印为 PDF。不要用 npm/puppeteer/weasyprint/pandoc（此机器 npm 有 EBUSY 问题，weasyprint 缺 GTK 系统库）。
-2. Edge 参数必带 `--print-to-pdf-no-header --no-margins` 以禁止默认页头页脚（时间戳、文件路径）。
-3. 隐私要求：转换后用 pypdf 剥离元数据（`writer.metadata = None`），页头页脚绝不能包含时间、文件路径等隐私信息。页头仅保留文件名，页脚仅保留页码。
-4. CSS 限制须知：`@page` margin boxes 不生效，`position: fixed` 被 Edge headless 剥离。页头/页脚需用独立 Edge 实例逐页生成（`position: absolute` + mm 坐标定位），再用 pypdf `merge_page(over=True)` 合并。
-5. fpdf2 与 pypdf 合并时 TrueType 字体会触发 `MERG NOT subset` 警告，导致水印文字丢失。改用 Edge 生成水印页可避免此问题。
-6. 用 Python `subprocess` 调 Edge 时，找不到 msedge.exe 浏览器路径，要主动询问用户。
+**推荐用 chromedp 技能，减少外部依赖**
+
+1. markdown 转 HTML → 用 `chromedp` 的 `print_to_pdf`（CDP + headless Chrome）打印；禁用 npm/puppeteer/weasyprint/pandoc。
+2. 不装 Poppler/pymupdf/reportlab，质检仅用 pypdf，视觉确认交用户。
+3. 页眉模板仅含文件名、页脚仅含页码；不用 CLI `--print-to-pdf-no-header`，统一走 CDP 自定义模板，避免默认模板混入 `file://` 路径与时间戳。
+4. pypdf 剥离元数据（`writer.metadata = None`），并校验产物不含 `file://` 与时间戳。
+5. 浏览器缺失用 `chromedp_find_chrome()` 探测，仍无则询问用户。
 
 ## Agent 自身问题回答原则
 

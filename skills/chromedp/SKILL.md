@@ -68,6 +68,22 @@ client = CDPClient(port=9222, url_filter="127.0.0.1:5000")
 # 截图
 client.screenshot("/tmp/page.png")
 
+# 打印 PDF（先等待页面加载完成，再打印；尺寸与边距单位为毫米）
+client.wait_for_navigation(timeout=10)
+client.print_to_pdf(
+    "/tmp/page.pdf",
+    paper_width=210,
+    paper_height=297,
+    margin_top=24,
+    margin_bottom=22,
+    margin_left=18,
+    margin_right=18,
+    page_ranges="",
+    display_header_footer=True,
+    header_template='<div style="width:100%;text-align:center;font-size:9px;">page.pdf</div>',
+    footer_template='<div style="width:100%;text-align:center;font-size:9px;"><span class="pageNumber"></span> / <span class="totalPages"></span></div>',
+)
+
 # 提取文本
 title = client.evaluate("document.title")
 body = client.evaluate("document.body.innerText")
@@ -119,6 +135,7 @@ else:
 |---|---|
 | `set_viewport(width, height)` | 设置浏览器视口尺寸 |
 | `screenshot(path)` | 截取当前页面 PNG |
+| `print_to_pdf(path, ...)` | 将当前页面打印为 PDF，支持自定义页眉页脚模板 |
 | `screenshot_element(selector, path)` | 截取指定元素的截图 |
 | `navigate(url)` | 导航到新 URL |
 | `reload()` | 重新加载当前页 |

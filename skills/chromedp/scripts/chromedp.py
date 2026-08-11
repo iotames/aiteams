@@ -1,7 +1,7 @@
 """
-Chromedp — Chrome DevTools Protocol helper for browser debugging.
+Chromedp —— 基于 Chrome DevTools Protocol（CDP）的浏览器调试辅助库。
 
-Usage:
+用法：
     from scripts.chromedp import chromedp_launch, CDPClient
 
     proc = chromedp_launch(url="http://127.0.0.1:5000")
@@ -24,43 +24,43 @@ import tempfile
 import websocket
 
 
-# ─── Error hierarchy ──────────────────────────────────────
+# ─── 错误层级 ────────────────────────────────────────────
 
 class CDPError(Exception):
-    """Base error for all CDP operations."""
+    """CDP 操作的基础异常。"""
     pass
 
 class CDPConnectionError(CDPError):
-    """WebSocket connection or transport failure."""
+    """WebSocket 连接或传输失败。"""
     pass
 
 class CDPTimeoutError(CDPError):
-    """CDP command timed out."""
+    """CDP 命令超时。"""
     pass
 
 class CDPJSError(CDPError):
-    """JavaScript execution error."""
+    """JavaScript 执行错误。"""
     pass
 
 
-# ─── Chrome launcher ──────────────────────────────────────
+# ─── Chrome 启动器 ───────────────────────────────────────
 
 def chromedp_find_chrome(browser="auto"):
-    """Locate the system Chrome/Edge binary.
+    """定位系统中已安装的 Chrome/Edge 可执行文件。
 
-    Args:
-        browser: ``"auto"`` (default, scan all), ``"chrome"`` (Chrome only),
-                 ``"edge"`` (Edge only).
+    参数：
+        browser: ``"auto"``（默认，全量扫描）、``"chrome"``（仅 Chrome）、
+                 ``"edge"``（仅 Edge）。
 
-    Supports Linux (APT/Snap/Linglong) and Windows (Chrome/Edge standard paths).
-    Falls back to ``where`` command on Windows when standard paths fail.
-    Returns (launch_command_prefix_list, binary_path) or raises FileNotFoundError.
+    支持 Linux（APT/Snap/Linglong）与 Windows（Chrome/Edge 标准路径）；
+    Windows 标准路径找不到时回退到 ``where`` 命令。
+    返回（启动命令前缀列表, 可执行文件路径），找不到时抛出 FileNotFoundError。
     """
     browser = browser.lower().strip()
     if browser not in ("auto", "chrome", "edge"):
         raise ValueError(f"browser must be 'auto', 'chrome', or 'edge', got {browser!r}")
 
-    # ── Linux paths (Chrome/Chromium only) ──
+    # ── Linux 路径（仅 Chrome/Chromium）──
     if browser in ("auto", "chrome"):
         linux_candidates = [
             "/usr/bin/google-chrome",
@@ -73,7 +73,7 @@ def chromedp_find_chrome(browser="auto"):
             if os.path.exists(lp):
                 return ([], lp)
 
-        # ── Linux linglong (Chrome only) ──
+        # ── Linux linglong（仅 Chrome）──
         import shutil
         llcli = shutil.which("ll-cli")
         if llcli:
@@ -87,7 +87,7 @@ def chromedp_find_chrome(browser="auto"):
                     return ([llcli, "run", "cn.google.chrome", "--"],
                             "/opt/apps/cn.google.chrome/files/bin/google/chrome/google-chrome")
 
-    # ── Windows paths ──
+    # ── Windows 路径 ──
     if os.name == "nt":
         user_profile = os.environ.get("USERPROFILE", "")
 
@@ -113,7 +113,7 @@ def chromedp_find_chrome(browser="auto"):
             if os.path.exists(wp):
                 return ([], wp)
 
-        # ── Windows fallback: ``where`` command ──
+        # ── Windows 回退：``where`` 命令 ──
         where_names = []
         if browser in ("auto", "chrome"):
             where_names.extend(["chrome", "google-chrome"])
@@ -147,23 +147,20 @@ def chromedp_launch(
     headless=False,
     browser="auto",
 ):
-    """Launch Chrome/Edge with remote debugging enabled.
+    """以远程调试模式启动 Chrome/Edge。
 
-    Args:
-        url: Initial URL to navigate to.
-        port: Remote debugging port.
-        user_data_dir: Custom profile directory (auto tempdir if None).
-        extra_flags: Additional command-line flags.
-        timeout: Seconds to wait for debug port readiness per attempt.
-        headless: Force headless mode (auto-detects display otherwise).
-        browser: ``"auto"`` (default), ``"chrome"``, or ``"edge"``.
+    参数：
+        url: 初始导航地址。
+        port: 远程调试端口。
+        user_data_dir: 自定义用户数据目录（默认自动创建临时目录）。
+        extra_flags: 附加命令行参数。
+        timeout: 每次等待调试端口就绪的秒数。
+        headless: 强制无头模式（否则按显示环境自动判断）。
+        browser: ``"auto"``（默认）、``"chrome"`` 或 ``"edge"``。
 
-    Auto-detects display environment: desktop OS (Windows) defaults to headed
-    mode; Linux checks DISPLAY/WAYLAND_DISPLAY environment variables.
-    Pass headless=True to force headless mode regardless.
-
-    Retries connecting to the debug port up to 3 times if Chrome is slow to start.
-    Returns the Popen handle. Caller should kill it when done.
+    自动检测显示环境：Windows 桌面默认有头模式；Linux 检查 DISPLAY/
+    WAYLAND_DISPLAY 环境变量。传 headless=True 可强制无头。
+    调试端口最多重试连接 3 次；返回 Popen 句柄，调用方负责结束进程。
     """
     if user_data_dir is None:
         user_data_dir = tempfile.mkdtemp(prefix="chromedp-")
@@ -213,10 +210,10 @@ def chromedp_launch(
     return proc
 
 
-# ─── CDP Client ───────────────────────────────────────────
+# ─── CDP 客户端 ──────────────────────────────────────────
 
 class CDPClient:
-    """Connect to Chrome via CDP. All events are buffered to prevent loss."""
+    """通过 CDP 连接 Chrome。所有事件都会缓冲，避免丢失。"""
 
     def __init__(self, port=9222, host="127.0.0.1", url_filter=None, timeout=10,
                  viewport=None):
@@ -266,7 +263,7 @@ class CDPClient:
             self.set_viewport(1280, 720)
 
     def _reconnect_ws(self):
-        """Re-establish WebSocket connection to the same target after a drop."""
+        """连接断开后重新建立到同一目标的 WebSocket 连接。"""
         tabs_url = f"http://{self.host}:{self.port}/json/{self._target_id}"
         info = json.loads(urllib.request.urlopen(tabs_url, timeout=5).read())
         ws_url = info.get("webSocketDebuggerUrl")
@@ -289,10 +286,10 @@ class CDPClient:
                 pass
 
     def _send(self, method, params=None):
-        """Send a CDP command, return its response.
+        """发送 CDP 命令并返回响应。
 
-        Non-response messages (events) are buffered in self._event_buffer
-        to prevent data loss. Retries once on WebSocket error.
+        非响应消息（事件）缓冲到 self._event_buffer，避免数据丢失；
+        WebSocket 出错时自动重试一次。
         """
         self._msg_id += 1
         msg = {"id": self._msg_id, "method": method}
@@ -338,9 +335,9 @@ class CDPClient:
         raise CDPTimeoutError(f'CDP command timed out after {self._timeout}s')
 
     def _collect_events(self, timeout=0.5):
-        """Drain buffered events and read fresh ones from the WebSocket.
+        """读取缓冲事件并从 WebSocket 接收新事件。
 
-        Returns ALL events (console, network, etc.) since last call.
+        返回自上次调用以来的全部事件（console、network 等）。
         """
         events = list(self._event_buffer)
         self._event_buffer.clear()
@@ -359,7 +356,7 @@ class CDPClient:
     # ─── 标签页管理 ────────────────────────────────────
 
     def list_tabs(self):
-        """List all open tabs/pages."""
+        """列出所有已打开的标签页。"""
         try:
             tabs_url = f"http://{self.host}:{self.port}/json"
             tabs = json.loads(urllib.request.urlopen(tabs_url, timeout=5).read())
@@ -372,9 +369,9 @@ class CDPClient:
             raise CDPError(f"Failed to list tabs: {e}")
 
     def switch_to_tab(self, target_id_or_filter):
-        """Switch to a different tab by ID or URL filter.
+        """按 ID 或 URL 过滤条件切换标签页。
 
-        Returns True on success. Raises CDPError if not found.
+        成功返回 True，找不到时抛出 CDPError。
         """
         tabs = self.list_tabs()
         target = None
@@ -418,7 +415,7 @@ class CDPClient:
             raise CDPError(f"Failed to switch tab: {e}")
 
     def new_tab(self, url=None):
-        """Open a new tab. If url is given, navigate to it."""
+        """打开新标签页；传入 url 时导航到该地址。"""
         new_url = f"http://{self.host}:{self.port}/json/new"
         if url:
             new_url += "?" + urllib.parse.urlencode({"url": url})
@@ -448,7 +445,7 @@ class CDPClient:
     # ─── 页面操作 ────────────────────────────────────────
 
     def set_viewport(self, width=1280, height=720):
-        """Set the browser viewport size."""
+        """设置浏览器视口尺寸。"""
         self._send("Emulation.setDeviceMetricsOverride", {
             "width": width, "height": height,
             "deviceScaleFactor": 1, "mobile": False,
@@ -458,6 +455,59 @@ class CDPClient:
         res = self._send("Page.captureScreenshot", {"format": "png", "fromSurface": True})
         with open(path, "wb") as f:
             f.write(base64.b64decode(res["result"]["data"]))
+        return path
+
+    def print_to_pdf(self, path, *, paper_width=210, paper_height=297,
+                     margin_top=24, margin_bottom=22, margin_left=18,
+                     margin_right=18, page_ranges="", header_template="",
+                     footer_template="", display_header_footer=False,
+                     print_background=True, prefer_css_page_size=False,
+                     landscape=False, scale=1.0):
+        """通过 CDP Page.printToPDF 将当前页面打印为 PDF。
+
+        参数：
+            path: 输出 PDF 文件路径。
+            paper_width/paper_height: 纸张尺寸（毫米，默认 A4）。
+            margin_*: 页面边距（毫米）。
+            page_ranges: 页码范围，如 "1-2,4"，空串表示全部。
+            header_template/footer_template: 页眉/页脚 HTML 模板，
+                仅在 display_header_footer=True 时生效。
+            display_header_footer: 是否显示自定义页眉页脚。
+            print_background: 是否打印 CSS 背景。
+            prefer_css_page_size: 是否遵循 CSS @page 尺寸/边距（慎用，
+                会覆盖本方法传入的纸张和边距参数）。
+            landscape: 横向打印。
+            scale: 页面缩放比例。
+
+        返回：
+            输出 PDF 文件路径。
+        """
+        mm_to_inch = 1 / 25.4
+        params = {
+            "landscape": landscape,
+            "displayHeaderFooter": display_header_footer,
+            "printBackground": print_background,
+            "scale": scale,
+            "paperWidth": paper_width * mm_to_inch,
+            "paperHeight": paper_height * mm_to_inch,
+            "marginTop": margin_top * mm_to_inch,
+            "marginBottom": margin_bottom * mm_to_inch,
+            "marginLeft": margin_left * mm_to_inch,
+            "marginRight": margin_right * mm_to_inch,
+            "preferCSSPageSize": prefer_css_page_size,
+            "transferMode": "ReturnAsBase64",
+        }
+        if page_ranges:
+            params["pageRanges"] = page_ranges
+        if display_header_footer:
+            params["headerTemplate"] = header_template
+            params["footerTemplate"] = footer_template
+        res = self._send("Page.printToPDF", params)
+        data = res.get("result", {}).get("data", "")
+        if not data:
+            raise CDPError("Page.printToPDF returned no data")
+        with open(path, "wb") as f:
+            f.write(base64.b64decode(data))
         return path
 
     def screenshot_element(self, selector, path):
@@ -565,7 +615,7 @@ class CDPClient:
         return []
 
     def is_visible(self, selector):
-        """Check if an element is visible (exists, not hidden, has size)."""
+        """检查元素是否可见（存在、非隐藏、有尺寸）。"""
         return self.evaluate(
             f"""(function() {{
                 const el = document.querySelector({json.dumps(selector)});
@@ -578,7 +628,7 @@ class CDPClient:
         )
 
     def is_enabled(self, selector):
-        """Check if an element is not disabled."""
+        """检查元素是否未被禁用。"""
         return self.evaluate(
             f"""(function() {{
                 const el = document.querySelector({json.dumps(selector)});
@@ -587,7 +637,7 @@ class CDPClient:
         )
 
     def get_attribute(self, selector, attr):
-        """Get an attribute value from an element."""
+        """获取元素的属性值。"""
         return self.evaluate(
             f"""(function() {{
                 const el = document.querySelector({json.dumps(selector)});
@@ -621,7 +671,7 @@ class CDPClient:
         )
 
     def clear(self, selector):
-        """Clear an input/textarea field."""
+        """清空 input/textarea 输入框。"""
         return self.evaluate(
             f"""(function() {{
                 const el = document.querySelector({json.dumps(selector)});
@@ -634,7 +684,7 @@ class CDPClient:
         )
 
     def hover(self, selector):
-        """Trigger mouseover event on an element."""
+        """触发元素的 mouseover 事件。"""
         return self.evaluate(
             f"""(function() {{
                 const el = document.querySelector({json.dumps(selector)});
@@ -678,7 +728,7 @@ class CDPClient:
         return False
 
     def wait_for_function(self, condition, timeout=5, interval=0.2):
-        """Wait for a JS expression to return a truthy value."""
+        """等待 JS 表达式返回真值。"""
         deadline = time.time() + timeout
         while time.time() < deadline:
             result = self.evaluate(condition)
@@ -698,11 +748,11 @@ class CDPClient:
         )
 
     def scroll_to_bottom(self):
-        """Scroll to the bottom of the page."""
+        """滚动到页面底部。"""
         return self.evaluate("window.scrollTo(0, document.body.scrollHeight); true;")
 
     def scroll_to_top(self):
-        """Scroll to the top of the page."""
+        """滚动到页面顶部。"""
         return self.evaluate("window.scrollTo(0, 0); true;")
 
     # ─── 对话框处理 ─────────────────────────────────────
@@ -721,10 +771,10 @@ class CDPClient:
     # ─── 日志 & 网络 ─────────────────────────────────────
 
     def get_events(self, timeout=1.0):
-        """Get ALL CDP events (console, network, etc.) since last call.
+        """获取自上次调用以来的全部 CDP 事件（console、network 等）。
 
-        Returns raw event dicts. Use get_console_logs() / get_network_errors()
-        for filtered views.
+        返回原始事件字典；需要过滤视图时用 get_console_logs() /
+        get_network_errors()。
         """
         return self._collect_events(timeout=timeout)
 
@@ -770,7 +820,7 @@ class CDPClient:
         ]
 
     def get_network_requests(self, timeout=1.0):
-        """Get all network requests and their responses."""
+        """获取全部网络请求及其响应。"""
         events = self._collect_events(timeout=timeout)
         requests = {}
         for ev in events:
