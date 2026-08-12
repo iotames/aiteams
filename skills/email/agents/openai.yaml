@@ -1,0 +1,4 @@
+interface:
+  display_name: "企业邮箱迁移"
+  short_description: "腾讯企业邮到 Exchange Online 的大规模邮箱迁移"
+  default_prompt: "Use $email to plan and execute a large-scale enterprise mailbox migration from Tencent Exmail to Exchange Online."
