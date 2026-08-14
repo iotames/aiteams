@@ -5,6 +5,7 @@
 - Git 提交前 → rules/git-commit-check.md
 - 查本地软件 → rules/cli-conventions.md
 - 定时/后台/cron 等自动化任务 → rules/no-token-waste.md
+- 启动端口监听或其他守护进程 → rules/background-processes.md
 - 下载依赖、访问外网 → rules/cn-network.md
 - 派发子 Agent → rules/subagent-transparency.md
 - Markdown 转 PDF → rules/md-to-pdf.md
