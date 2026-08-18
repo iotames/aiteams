@@ -11,6 +11,7 @@
 
 ## 目录
 
+0. 脚本用途 | 谁执行
 1. CSV 格式与准备
 2. 阶段 0：前置检查
 3. 阶段 1：分析与超限识别
@@ -19,7 +20,8 @@
 6. 阶段 4：收尾核对
 7. 注意事项与硬限制
 8. 故障排查
-9. TODO：imapsync 兜底
+9. 按时间迁移 ContentFilter（优先）
+10. imapsync 兜底
 
 ## 0. 脚本用途 | 谁执行（按数据来源划界）
 
@@ -112,7 +114,7 @@ Test-MigrationServerAvailability -IMAP -RemoteServer "imap.exmail.qq.com" -Port 
 python skills/email/scripts/email_migration.py probe password.csv
 ```
 
-`probe` 会逐账号列出文件夹与邮件数并写报告到 output/email-migration/。邮件总数明显偏小（如只有几十封）通常说明腾讯"收取范围"仍是"最近 30 天"，需先改设置再迁移。
+`probe` 会逐账号列出文件夹与邮件数并写报告到 output/email-migration/。报告为 probe_report_*.csv，共 5 列：`SourceEmail, FolderName, MailCount, MailSizeBytes, Status`（MailSizeBytes 为各文件夹占用字节；Status 为 OK / SELECT 失败 / 失败:异常名，账号级连接失败时 FolderName 为空）。邮件总数明显偏小（如只有几十封）通常说明腾讯"收取范围"仍是"最近 30 天"，需先改设置再迁移。
 
 ### 迁移终结点与 MRM 策略
 
@@ -156,7 +158,7 @@ Get-MigrationUser -BatchId $analysisName | Get-MigrationUserStatistics |
 # 导出统计（导出到共享目录，供 analyze 脚本消费），用本次批名
 Get-MigrationUser -BatchId $analysisName | Get-MigrationUserStatistics |
     Export-Csv -Path "output/email-migration/analysis_stats.csv" -NoTypeInformation -Encoding UTF8
-# 建议：导出后用脚本先看表头确认列名齐全再 analyze；若空文件说明 Get-Mailbox 过滤没匹配到，改用 PrimarySmtpAddress 过滤
+# 建议：导出后用脚本先看表头确认列名齐全再 analyze；若空文件说明 Get-MigrationUser -BatchId 过滤没匹配到，改用 PrimarySmtpAddress 过滤
 ```
 
 ```bash
@@ -233,8 +235,10 @@ $filter = "Received -ge '" + $yearAgo + "'"
 
 $batchName = "Migrate_1Y_" + (Get-Date -Format "yyyyMMdd_HHmmss")
 New-MigrationBatch -Name $batchName -SourceEndpoint "TencentIMAPEndpoint" -CSVData $csvData -AutoStart \
-    -AllowUnknownColumnsInCsv $true -ContentFilter $filter -ContentFilterLanguage "zh-CN"
+    -AllowUnknownColumnsInCsv $true -ContentFilter $filter
 ```
+> **说明**：`New-MigrationBatch` 官方没有 `-ContentFilterLanguage` 参数（该参数属传统 Set-ContentFilterConfig 类）。若 `Get-Help New-MigrationBatch` 返回的属性中包含 ContentFilterLanguage 则可保留，否则按本文件删除该参数（无需它也能用 -ContentFilter）。
+
 
 **`-ContentFilter` 语法（OPATH 过滤）：**
 - 只支持 `Received`（收件时间），**不支持 `Sent`（发件时间）**。
@@ -303,15 +307,7 @@ Remove-MigrationBatch -Identity $batchName -Confirm:$false
 - 登录提示"是否登录到此设备上的所有应用和网站"：先选"否"，出问题再选"是"
 - 迁移用户重复/统计异常：`Get-MigrationUserStatistics` 存在 BatchId 过滤 BUG，以 Identity 为准去重
 
-## 9. 按时间迁移：官方 `-ContentFilter`（优先）
-
-微软官方 `New-MigrationBatch` 的 `-ContentFilter` 参数支持按 Received 时间筛选（语法见阶段 3b），**这是按时间迁移的正解，商业标准版可直接用，优先于 imapsync**。示例只迁最近 1 年：
-
-```powershell
-$yearAgo = (Get-Date).AddYears(-1).ToString("yyyy/M/d")
-$filter = "Received -ge '" + $yearAgo + "'"
-New-MigrationBatch -Name <batch> -SourceEndpoint "TencentIMAPEndpoint" -CSVData $csvData -AutoStart     -AllowUnknownColumnsInCsv $true -ContentFilter $filter -ContentFilterLanguage "zh-CN"
-```
+## 9. 按时间迁移：官方 `-ContentFilter`（优先）——完整命令与语法见阶段 3b。**结论：官方 `-ContentFilter` 支持按 Received 时间筛选，商业标准版直接可用，优先于 imapsync。**
 
 ## 10. imapsync（仅当官方 `-ContentFilter` 无法覆盖时才用）
 

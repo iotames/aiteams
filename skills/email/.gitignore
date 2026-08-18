@@ -1,0 +1,6 @@
+# 技能运行时产物与敏感数据（不进入仓库）
+output/
+*.csv
+password*
+.pytest_cache/
+__pycache__/

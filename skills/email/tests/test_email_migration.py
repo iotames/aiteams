@@ -260,9 +260,9 @@ def test_12_probe_success_writes_report(tmp_path: Path, monkeypatch) -> None:
     assert email_migration.main(["probe", str(src), "--output", str(out)]) == 0
     report = sorted(out.rglob("probe_report_*.csv"))[0]
     header, rows = email_migration.load_csv(report)
-    assert header == ["SourceEmail", "FolderName", "MailCount", "Status"]
+    assert header == ["SourceEmail", "FolderName", "MailCount", "MailSizeBytes", "Status"]
     assert len(rows) == 4  # 2 账号 × 2 文件夹
-    assert all(r["MailCount"] == "10" and r["Status"] == "OK" for r in rows)
+    assert all(r["MailCount"] == "10" and r["MailSizeBytes"] == "0" and r["Status"] == "OK" for r in rows)
     assert not any("password" in str(r).lower() for r in rows)
 
 
@@ -346,3 +346,110 @@ def test_18_state_rejects_unknown_phase(tmp_path: Path) -> None:
     with _pt.raises(SystemExit) as e:
         email_migration.main(["state", "--output", str(out), "--phase", "phaseX"])
     assert e.value.code == 2
+
+
+# -- 修复回归：probe 不带引号的简单文件夹名（M1） --------------------
+
+def test_19_parse_list_folder_unquoted_simple_name() -> None:
+    """不带引号的简单文件夹名（如 INBOX）必须被解析，不能静默丢弃。"""
+    got = email_migration._parse_list_folder(br'(\HasNoChildren) "/" "INBOX"')
+    assert got == ("INBOX", "INBOX")
+    got2 = email_migration._parse_list_folder(br'(\HasNoChildren) "/" INBOX')
+    assert got2 == ("INBOX", "INBOX")
+    got3 = email_migration._parse_list_folder(br'(\HasNoChildren) "/" "Sent Items"')
+    assert got3 == ("Sent Items", "Sent Items")
+
+
+# -- 修复回归：纯数字字节解析（M3） -----------------------------
+
+def test_20_parse_size_bytes_pure_number() -> None:
+    """纯数字（字节）或带千分位数字也能解析，不再误报 0，超限识别不漏报。"""
+    assert email_migration._parse_size_bytes("64424509440") == 64424509440
+    assert email_migration._parse_size_bytes("30,551,458,399") == 30551458399
+    assert email_migration._parse_size_bytes("   ") == 0
+
+
+# -- 修复回归：中文收件箱计入 InboxItems（M2） --------------------
+
+def test_21_verify_chinese_inbox_counted(tmp_path: Path) -> None:
+    """中文「收件箱」文件夹计入 InboxItems，不落入 other 导致核对误报/低估。"""
+    folder_stats = tmp_path / "folder_stats.csv"
+    _write_csv(folder_stats, ["Identity", "FolderPath", "ItemsInFolder"], [
+        {"Identity": "zh@corp.onmicrosoft.com", "FolderPath": "/收件箱", "ItemsInFolder": "33"},
+        {"Identity": "zh@corp.onmicrosoft.com", "FolderPath": "/Sent Items", "ItemsInFolder": "2"},
+    ])
+    out = tmp_path / "out"
+    assert email_migration.main(["verify", str(folder_stats), "--output", str(out)]) == 0
+    report = sorted(out.rglob("verify_report_*.csv"))[0]
+    _header, rows = email_migration.load_csv(report)
+    by_mailbox = {r["EmailAddress"]: r for r in rows}
+    assert by_mailbox["zh@corp.onmicrosoft.com"]["InboxItems"] == "33"
+
+
+# -- 修复回归：verify EmptyTarget 语义 + manifest 失败候选探测（M3） --
+
+def test_22_verify_empty_target_by_total_items(tmp_path: Path) -> None:
+    """不提供 manifest：EmptyTarget 按该邮箱所有文件夹 items 总和==0 判定，
+    而非 folders==0。文件夹存在但全空 → EmptyTarget=是。"""
+    folder_stats = tmp_path / "folder_stats.csv"
+    _write_csv(folder_stats, ["Identity", "FolderPath", "ItemsInFolder"], [
+        # 该邮箱有 2 个文件夹但全部为空 → 真正空目标
+        {"Identity": "all-empty@corp.onmicrosoft.com", "FolderPath": "/Inbox", "ItemsInFolder": "0"},
+        {"Identity": "all-empty@corp.onmicrosoft.com", "FolderPath": "/Sent Items", "ItemsInFolder": "0"},
+        # 非空邮箱不应误报空目标
+        {"Identity": "has-items@corp.onmicrosoft.com", "FolderPath": "/Inbox", "ItemsInFolder": "5"},
+    ])
+    out = tmp_path / "out"
+    assert email_migration.main(["verify", str(folder_stats), "--output", str(out)]) == 0
+    report = sorted(out.rglob("verify_report_*.csv"))[0]
+    header, rows = email_migration.load_csv(report)
+    assert "MissingInStats" not in header  # 无 manifest 时不应输出该列
+    by_mailbox = {r["EmailAddress"]: r for r in rows}
+    assert by_mailbox["all-empty@corp.onmicrosoft.com"]["EmptyTarget"] == "是"
+    assert by_mailbox["has-items@corp.onmicrosoft.com"]["EmptyTarget"] == "否"
+
+
+def test_23_verify_manifest_detects_missing_in_stats(tmp_path: Path) -> None:
+    """提供 manifest：名单中有但统计 CSV 缺失的邮箱 → MissingInStats=是；
+    名单中有且统计有行的邮箱 → MissingInStats=否。"""
+    manifest = tmp_path / "manifest.csv"
+    _write_csv(manifest, ["EmailAddress"], [
+        {"EmailAddress": "missing@corp.onmicrosoft.com"},   # 名单有、统计无
+        {"EmailAddress": "present@corp.onmicrosoft.com"},   # 名单有、统计有
+    ])
+    folder_stats = tmp_path / "folder_stats.csv"
+    _write_csv(folder_stats, ["Identity", "FolderPath", "ItemsInFolder"], [
+        {"Identity": "present@corp.onmicrosoft.com", "FolderPath": "/Inbox", "ItemsInFolder": "7"},
+    ])
+    out = tmp_path / "out"
+    assert email_migration.main(
+        ["verify", str(folder_stats), "--manifest", str(manifest), "--output", str(out)]
+    ) == 0
+    report = sorted(out.rglob("verify_report_*.csv"))[0]
+    header, rows = email_migration.load_csv(report)
+    assert "MissingInStats" in header
+    by_mailbox = {r["EmailAddress"]: r for r in rows}
+    assert by_mailbox["missing@corp.onmicrosoft.com"]["MissingInStats"] == "是"
+    assert by_mailbox["missing@corp.onmicrosoft.com"]["EmptyTarget"] == "是"
+    assert by_mailbox["present@corp.onmicrosoft.com"]["MissingInStats"] == "否"
+
+
+def test_24_verify_chinese_inbox_backup_not_counted(tmp_path: Path) -> None:
+    """中文「收件箱备份」等含关键词的文件夹不应按子串误计入 InboxItems（L1 精确匹配）。"""
+    folder_stats = tmp_path / "folder_stats.csv"
+    _write_csv(folder_stats, ["Identity", "FolderPath", "ItemsInFolder"], [
+        {"Identity": "oldbackup@corp.onmicrosoft.com", "FolderPath": "/收件箱备份", "ItemsInFolder": "99"},
+        {"Identity": "oldbackup@corp.onmicrosoft.com", "FolderPath": "/收件箱", "ItemsInFolder": "1"},
+        {"Identity": "inboxsub@corp.onmicrosoft.com", "FolderPath": "/Inbox/sub", "ItemsInFolder": "50"},
+    ])
+    out = tmp_path / "out"
+    assert email_migration.main(["verify", str(folder_stats), "--output", str(out)]) == 0
+    report = sorted(out.rglob("verify_report_*.csv"))[0]
+    _header, rows = email_migration.load_csv(report)
+    by_mailbox = {r["EmailAddress"]: r for r in rows}
+    # 只有精确的 /收件箱 计入；「收件箱备份」归入 other，不得计入 InboxItems
+    assert by_mailbox["oldbackup@corp.onmicrosoft.com"]["InboxItems"] == "1"
+    assert by_mailbox["oldbackup@corp.onmicrosoft.com"]["OtherItems"] == "99"
+    # 路径段精确为 inbox（含收件箱子目录）→ 计入收件箱
+    assert by_mailbox["inboxsub@corp.onmicrosoft.com"]["InboxItems"] == "50"
+    assert by_mailbox["inboxsub@corp.onmicrosoft.com"]["OtherItems"] == "0"

@@ -248,6 +248,10 @@ def _parse_size_bytes(raw: str) -> int:
         value = float(m.group(1))
         unit = m.group(2).upper()
         return int(value * {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3}[unit])
+    # 纯数字（字节）或带千分位数字：直接当字节数
+    digits = text.replace(",", "").strip()
+    if digits and digits.isdigit():
+        return int(digits)
     return 0
 
 
@@ -294,8 +298,32 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     return 0
 
 
+def _normalize_folder(folder: str) -> str:
+    """归一化文件夹路径：去掉首尾斜杠，按路径段精确判分类别。
+
+    用路径段精确匹配而非子串匹配，避免「收件箱备份」等含关键词的文件夹被误判为收件箱。
+    首段为 Inbox/收件箱 = 收件箱；其余按 Deleted/Trash/已删除/档案标记分类，否则归为其他。
+    """
+    segments = [s for s in re.split(r"[/\\]+", folder.strip()) if s]
+    if not segments:
+        return "other"
+    first = segments[0].lower()
+    if first == "inbox" or first == "收件箱":
+        return "inbox"
+    if any(k in first for k in ("deleted", "trash", "已删除")):
+        return "deleted"
+    # 注意：仅按首段分类，`/Inbox/sub` 首段为 inbox 会并入收件箱，`/Sent Items/sub` 首段非 inbox 则归 other。
+    return "other"
+
+
 def cmd_verify(args: argparse.Namespace) -> int:
-    """核对文件夹统计 CSV（列: Identity/EmailAddress, FolderPath, ItemsInFolder），输出逐邮箱报告。"""
+    """核对文件夹统计 CSV（列: Identity/EmailAddress, FolderPath, ItemsInFolder），输出逐邮箱报告。
+
+    提供 --manifest（迁移名单 CSV，含 EmailAddress 列）时：
+      - 名单中有、但统计 CSV 中完全缺失的邮箱 → 标记为失败候选（MissingInStats=是，疑似迁移失败/未导出）。
+      - EmptyTarget 定义为该邮箱所有文件夹 items 总和为 0。
+    不提供 manifest 时保持现状，EmptyTarget 同样按 items 总和判断（不再使用 folders==0）。
+    """
     header, rows = load_csv(Path(args.csv))
     identity_col = next((c for c in ("Identity", "EmailAddress") if c in header), None)
     folder_col = next((c for c in ("FolderPath", "Name") if c in header), None)
@@ -303,6 +331,16 @@ def cmd_verify(args: argparse.Namespace) -> int:
     if not identity_col or not folder_col or not items_col:
         print("[错误] 文件夹统计 CSV 缺少必需列（Identity/EmailAddress、FolderPath、ItemsInFolder）")
         return 1
+
+    # 读取迁移名单（可选）：用于探测名单中有但统计中缺失的邮箱
+    manifest_set: set[str] | None = None
+    if args.manifest:
+        m_header, m_rows = load_csv(Path(args.manifest))
+        m_addr_col = next((c for c in ("EmailAddress", "Identity") if c in m_header), None)
+        if m_addr_col is None:
+            print(f"[错误] manifest 缺少 EmailAddress 列，实际表头: {', '.join(m_header)}")
+            return 1
+        manifest_set = {r.get(m_addr_col, "").strip().lower() for r in m_rows if r.get(m_addr_col, "").strip()}
 
     per_mailbox: dict[str, dict[str, int]] = {}
     for r in rows:
@@ -314,20 +352,35 @@ def cmd_verify(args: argparse.Namespace) -> int:
             items = 0
         mb = per_mailbox.setdefault(ident, {"folders": 0, "inbox": 0, "deleted": 0, "other": 0})
         mb["folders"] += 1
-        fl = folder.lower()
-        if "inbox" in fl:
-            mb["inbox"] += items
-        elif "deleted" in fl or "trash" in fl or "已删除" in fl:
-            mb["deleted"] += items
-        else:
-            mb["other"] += items
+        cat = _normalize_folder(folder)
+        mb[cat] += items
 
     report_header = ["EmailAddress", "FolderCount", "InboxItems", "DeletedItems", "OtherItems", "EmptyTarget", "DeletedItemsNotCleared"]
+    if manifest_set is not None:
+        report_header.append("MissingInStats")
+
     report: list[dict[str, str]] = []
+    # 先喂入名单中但统计缺失的邮箱（失败候选），再按字母序输出统计中的邮箱
+    if manifest_set is not None:
+        missing_n = 0
+        for ident in sorted(manifest_set):
+            if ident not in per_mailbox:
+                report.append({
+                    "EmailAddress": ident,
+                    "FolderCount": "0",
+                    "InboxItems": "0",
+                    "DeletedItems": "0",
+                    "OtherItems": "0",
+                    "EmptyTarget": "是",
+                    "DeletedItemsNotCleared": "否",
+                    "MissingInStats": "是",
+                })
+                missing_n += 1
     for ident, mb in sorted(per_mailbox.items()):
-        empty = mb["folders"] == 0
+        # 空目标定义：该邮箱所有文件夹 items 总和为 0（而非 folders==0，避免漏报真正空目标）
+        empty = (mb["inbox"] + mb["deleted"] + mb["other"]) == 0
         deleted_not_cleared = mb["deleted"] > 0
-        report.append({
+        row = {
             "EmailAddress": ident,
             "FolderCount": str(mb["folders"]),
             "InboxItems": str(mb["inbox"]),
@@ -335,7 +388,10 @@ def cmd_verify(args: argparse.Namespace) -> int:
             "OtherItems": str(mb["other"]),
             "EmptyTarget": "是" if empty else "否",
             "DeletedItemsNotCleared": "是" if deleted_not_cleared else "否",
-        })
+        }
+        if manifest_set is not None:
+            row["MissingInStats"] = "否"
+        report.append(row)
 
     out_dir = Path(args.output) / _output_subdir()
     out = out_dir / f"verify_report_{_now_stamp()}.csv"
@@ -346,6 +402,10 @@ def cmd_verify(args: argparse.Namespace) -> int:
     deleted_n = sum(1 for r in report if r["DeletedItemsNotCleared"] == "是")
     if empty_n:
         print(f"[警告] 空目标邮箱: {empty_n} 个（需人工确认是否迁移失败）")
+    if manifest_set is not None:
+        missing_n = sum(1 for r in report if r["MissingInStats"] == "是")
+        if missing_n:
+            print(f"[警告] 名单中有但统计缺失的邮箱 {missing_n} 个（疑似迁移失败/未导出）")
     if deleted_n:
         print(f"[提示] 已删除邮件有内容: {deleted_n} 个（确认这些邮件是否应进入目标邮箱）")
     return 0
@@ -369,10 +429,16 @@ def _parse_list_folder(line: bytes) -> tuple[str, str] | None:
     仅展示用解码名。
     """
     text = line.decode("utf-8", "replace").strip()
-    match = re.search(r'"([^"]*)"\s*$', text)
-    if not match:
-        return None
-    raw = match.group(1)
+    # 邮箱名可能带引号（含空格/特殊字符时服务端强制）或无引号（纯简单名，如 INBOX）。
+    # 只认带引号会静默丢弃不带引号的真实文件夹 → probe 低估邮件数，故两者都支持。
+    quoted = re.search(r'"([^"]*)"\s*$', text)
+    if quoted:
+        raw = quoted.group(1)
+    else:
+        fields = text.split()
+        if len(fields) < 2:
+            return None
+        raw = fields[-1]
     try:
         decoded = imaplib.UTF7.decode(raw)
     except Exception:
@@ -551,6 +617,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_verify = sub.add_parser("verify", help="生成迁移后文件夹核对报告")
     p_verify.add_argument("csv", help="Get-MailboxFolderStatistics 导出的文件夹统计 CSV")
+    p_verify.add_argument("--manifest", default=None, help="迁移名单 CSV（含 EmailAddress 列）；提供时额外探测名单中但统计缺失的邮箱（失败候选）")
     p_verify.add_argument("--output", default=_output_default(), help="产物根目录（可环境变量 EMAIL_MIGRATION_OUTPUT 覆盖）")
     p_verify.set_defaults(func=cmd_verify)
 
@@ -576,6 +643,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # 终端输出统一 UTF-8，避免 Windows 非 UTF-8 控制台中文乱码（纯显示层，不影响文件写入/解析）。
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
     args = build_parser().parse_args(argv)
     return args.func(args)
 

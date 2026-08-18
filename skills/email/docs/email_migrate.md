@@ -1,3 +1,5 @@
+> ⚠️ **声明**：本文档为早期手记草稿，仅供参考。正式工作流以 `references/migration-workflow.md` 与 `SKILL.md` 为准。文中命令可能与新版能力冲突，勿直接照抄。
+
 ## 背景
 
 公司要从腾讯企业邮迁移到微软邮箱。腾讯企业邮单邮箱空间没限制，微软邮箱标准版，单邮箱空间限制50G。
@@ -14,7 +16,7 @@
 # 安装 ExchangeOnlineManagement 模块。
 Install-Module -Name ExchangeOnlineManagement -Force -AllowClobber
 
-# 修改执行策略为 RemoteSigned 
+# 修改执行策略为 RemoteSigned
 Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
 
 # 手动导入模块
@@ -105,9 +107,7 @@ Get-MailboxAnalysisRequestStatistics $user -IncludeAnalysisResult -IncludeFolder
 **命令 9：导出超限邮箱名单（大小超 45GB 或数量超 50 万）**
 
 ```powershell
-Get-MigrationUser -BatchId "TencentToM365_Analysis" |
-    Where-Object { $_.EstimatedTotalSize -gt 45GB -or $_.EstimatedTotalCount -gt 500000 } |
-    Format-Table Identity, EstimatedTotalCount, EstimatedTotalSize
+Get-MigrationUser -BatchId "TencentToM365_Analysis" | Get-MigrationUserStatistics | Where-Object { $_.EstimatedTotalSize -gt 45GB -or $_.EstimatedTotalCount -gt 500000 } | Format-Table Identity, EstimatedTotalCount, EstimatedTotalSize
 ```
 
 #### 正式迁移
@@ -127,7 +127,7 @@ New-MigrationBatch -Name $batchName -SourceEndpoint "TencentIMAPEndpoint" -CSVDa
 
 ```powershell
 # 只迁移 2025/1/1 之后（含）接收的邮件：
-New-MigrationBatch -Name $batchName -SourceEndpoint "TencentIMAPEndpoint" -CSVData $csvData -AutoStart -AllowUnknownColumnsInCsv $true -ContentFilter "Received -ge '2025/1/1'" -ContentFilterLanguage "zh-CN"
+New-MigrationBatch -Name $batchName -SourceEndpoint "TencentIMAPEndpoint" -CSVData $csvData -AutoStart -AllowUnknownColumnsInCsv $true -ContentFilter "Received -ge '2025/1/1'"
 
 # 只迁移 2023/1/1 之前接收的邮件：
 New-MigrationBatch ... -ContentFilter "Received -le '2023/1/1'" ...
@@ -145,7 +145,6 @@ New-MigrationBatch ... -ContentFilter $filter ...          # 用变量传入
 - 只支持 `Received`（收件时间/邮件落箱时间）属性，**不支持 `Sent`（发件时间）**。
 - 支持操作符：`-gt`（大于）、`-ge`（大于等于）、`-lt`（小于）、`-le`（小于等于）、`-and`（且）、`-or`（或）。
 - 时间值用单引号包住，格式 `yyyy/M/d`（如 `'2023/1/1'`）。
-- `-ContentFilterLanguage` 指定字符串搜索的语言文化（如 `zh-CN`）。
 - 官方示例：`"Received -gt '8/23/2020'"`、`"Received -le '2019/01/01'"`、`"Received -gt '8/23/2015' -and Received -lt '8/23/2020'"`。
 - **注意**：`-ContentFilter` 是筛选「是否迁移某封邮件」，与 `-Analyze`（仅估算不迁移）相互独立；做按时间迁移时不要加 `-Analyze`。
 
@@ -219,8 +218,7 @@ Get-MigrationUser -BatchId "TencentToM365_Analysis" |
 
 - 分析批处理创建后，用 Get-MailboxAnalysisRequestStatistics -IncludeAnalysisResult -IncludeFolderDetails -ItemsStartTime "2025/08/01" 可按时间窗口查看每个文件夹的条目数和大小（月粒度）。
 - 还能用 -IncludeMappingResult 生成 XML mapping，把旧邮件自动映射到归档邮箱，官方方案是 "Automated large mailbox migration from IMAP sources"。
-- 两个前提需要写进文档：① IMAP 分析要求目标 EXO 邮箱已创建；② mapping 分发依赖主邮箱+云归档（Main/Auxiliary Archive），商业标准版默认没有云归档，需 E3/E5 或 Exchange Online Archiving 附加。所以标准版下
-
+- 适用前提：① IMAP 分析要求目标 EXO 邮箱已创建；② mapping 分发依赖主邮箱+云归档（Main/Auxiliary Archive），商业标准版默认没有云归档，需 E3/E5 或 Exchange Online Archiving 附加。所以标准版下只能走 `-ContentFilter` 按时间筛选（单邮箱落在主邮箱），无法做 XML mapping 归档分流；无云归档许可时，按时间裁剪用 `-ContentFilter`（见命令 10b）而非 imapsync。
 
 ### Exchange管理中心
 

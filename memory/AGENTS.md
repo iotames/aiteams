@@ -12,7 +12,7 @@
 - Markdown 转 PDF → rules/md-to-pdf.md
 - 被问及 Agent 自身 → rules/agent-self-questions.md
 
-> **› 重要：本 AGENTS.md 可能是符号链接，上面的 `rules/` 在默认路径下如果找不到，可能指向符号链接目标的同目录 `rules/`。**
+> **› 重要：本 AGENTS.md `可能` 是符号链接，上面的 `rules/` 路径如果找不到，则可能指向符号链接目标的同目录 `rules/`。**
 > **若按默认路径找不到子文件：先解析符号链接真实路径，再从真实目录读；定位失败只向用户提问，不做全线扫描。**
 
 ## 语言偏好
