@@ -285,3 +285,64 @@ def test_14_mask_email() -> None:
     assert email_migration._mask_email("abc@example.com") == "a***c@example.com"
     assert email_migration._mask_email("ab@example.com") == "a***@example.com"
     assert email_migration._mask_email("nouser") == "***"
+
+
+# ── 阶段状态机（跨会话共享进度） ──────────────────────────────────
+
+def test_15_state_init_and_advance(tmp_path: Path) -> None:
+    """state 初始化后默认阶段0；advance 标记完成并推进到阶段1。"""
+    out = tmp_path / "out"
+    # 初始化写入
+    rc = email_migration.main(["state", "--output", str(out)])
+    assert rc == 0
+    state_file = out / "email-migration" / "state" / "email-migration-state.json"
+    assert state_file.exists()
+    s = email_migration.load_state(state_file)
+    assert s["phase"] == "phase0"
+    # 标记当前完成并推进
+    assert email_migration.main(["state", "--output", str(out), "--advance"]) == 0
+    s = email_migration.load_state(state_file)
+    assert s["phase"] == "phase1"
+    assert s["done"]["phase0"] is True
+
+
+def test_16_state_todo_confirm_and_notes(tmp_path: Path) -> None:
+    """todo 加入待确认项，confirm 移除；note 追加备注。"""
+    out = tmp_path / "out"
+    sfile = "custom-state.json"
+    args = lambda *flags: ["state", "--output", str(out), "--state-file", sfile, *flags]
+    assert email_migration.main(args("--todo", "确认目标邮箱已分配许可证")) == 0
+    assert email_migration.main(args("--todo", "确认腾讯收取范围为全部")) == 0
+    state_file = out / "email-migration" / "state" / sfile
+    s = email_migration.load_state(state_file)
+    assert "确认目标邮箱已分配许可证" in s["pending_confirm"]
+    assert len(s["pending_confirm"]) == 2
+    # confirm 移除一项
+    assert email_migration.main(args("--confirm", "确认目标邮箱已分配许可证")) == 0
+    s = email_migration.load_state(state_file)
+    assert "确认目标邮箱已分配许可证" not in s["pending_confirm"]
+    assert len(s["pending_confirm"]) == 1
+    # 备注
+    assert email_migration.main(args("--note", "测试备注")) == 0
+    s = email_migration.load_state(state_file)
+    assert "测试备注" in s["notes"]
+
+
+def test_17_state_jump_to_phase(tmp_path: Path) -> None:
+    """--phase 可直接跳转到指定阶段。"""
+    out = tmp_path / "out"
+    assert email_migration.main(["state", "--output", str(out), "--advance"]) == 0
+    assert email_migration.main(["state", "--output", str(out), "--advance"]) == 0
+    assert email_migration.main(["state", "--output", str(out), "--phase", "phase3"]) == 0
+    state_file = out / "email-migration" / "state" / "email-migration-state.json"
+    s = email_migration.load_state(state_file)
+    assert s["phase"] == "phase3"
+
+
+def test_18_state_rejects_unknown_phase(tmp_path: Path) -> None:
+    """非法阶段由 argparse 报错并退出码 2。"""
+    import pytest as _pt
+    out = tmp_path / "out"
+    with _pt.raises(SystemExit) as e:
+        email_migration.main(["state", "--output", str(out), "--phase", "phaseX"])
+    assert e.value.code == 2

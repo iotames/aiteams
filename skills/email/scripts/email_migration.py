@@ -7,10 +7,23 @@
   split     按批拆分迁移 CSV（默认 50 人/批，供小批量验证与分批迁移）
   analyze   解析分析批处理统计，筛超限名单（默认 >45GB 或 >50 万条）
   verify    迁移后核对报告（文件夹统计，含已删除邮件覆盖情况）
+  state     读写阶段状态文件，供交互式工作流在人工切会话时共享进度
+
+交互式闭环说明：
+  技能产出精排 PowerShell 命令 → 你粘贴执行 → 结果导出到 output/email-migration/
+  → 脚本消费该文件（analyze/verify/probe）→ 技能据结果推进 state → 进入下一阶段。
+  output/ 已入 .gitignore，含密码产物不会进仓库。
 
 安全约束：
   - 密码仅在本机代码内流转，任何输出/日志不得出现密码原文
   - 含密码的产物默认写入 <cwd>/output/email-migration/（已被 .gitignore 忽略）
+
+可配置项（不写死，均可用环境变量或命令行覆盖）：
+  - EMAIL_MIGRATION_REQUIRED_COLS    必填列（默认 EmailAddress,UserName,Password）
+  - EMAIL_MIGRATION_SUBDIR           输出子目录（默认 email-migration）
+  - EMAIL_MIGRATION_OUTPUT           输出根目录（默认 output）
+  - EMAIL_MIGRATION_IMAP_HOST/_PORT  源 IMAP 服务器（默认 imap.exmail.qq.com:993 SSL）
+  - CLI: --size-gb/--count/--batch-size/--host/--port/--output
 """
 
 from __future__ import annotations
@@ -24,13 +37,78 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# 官方 IMAP 迁移 CSV 必填列
-REQUIRED_COLUMNS = ("EmailAddress", "UserName", "Password")
+# 官方 IMAP 迁移 CSV 必填列（可用环境变量 EMAIL_MIGRATION_REQUIRED_COLS 覆盖，逗号分隔）
+def _required_columns() -> tuple[str, ...]:
+    import os
+    raw = os.environ.get("EMAIL_MIGRATION_REQUIRED_COLS", "EmailAddress,UserName,Password")
+    return tuple(c.strip() for c in raw.split(",") if c.strip())
+
+
+REQUIRED_COLUMNS = _required_columns()
+
+# 输出子目录（可用环境变量 EMAIL_MIGRATION_SUBDIR 覆盖，避免强绑定为 email-migration）
+def _output_subdir() -> str:
+    import os
+    return os.environ.get("EMAIL_MIGRATION_SUBDIR", "email-migration")
+
+
+# 输出根目录默认值（可用 EMAIL_MIGRATION_OUTPUT 覆盖）
+def _output_default() -> str:
+    import os
+    return os.environ.get("EMAIL_MIGRATION_OUTPUT", "output")
+
+
+# 源 IMAP 主机/端口默认值（可用 EMAIL_MIGRATION_IMAP_HOST / _PORT 覆盖，非强绑定腾讯）
+def _imap_host_default() -> str:
+    import os
+    return os.environ.get("EMAIL_MIGRATION_IMAP_HOST", "imap.exmail.qq.com")
+
+
+def _imap_port_default() -> int:
+    import os
+    return int(os.environ.get("EMAIL_MIGRATION_IMAP_PORT", "993"))
+
 
 # 官方迁移硬限制：单邮箱最多 50 万项、单封最大 35MB；超限判断阈值留 5GB 余量
+# 均可通过 --size-gb / --count / --batch-size 覆盖，见 build_parser
 DEFAULT_SIZE_THRESHOLD_GB = 45
 DEFAULT_COUNT_THRESHOLD = 500_000
 DEFAULT_BATCH_SIZE = 50
+
+# 交互式工作流阶段顺序（state 文件据此校验与推进入口）
+PHASES = ["phase0", "phase1", "phase2", "phase3", "phase4"]
+PHASE_LABELS = {
+    "phase0": "阶段0-前置检查",
+    "phase1": "阶段1-分析与超限识别",
+    "phase2": "阶段2-小批量验证",
+    "phase3": "阶段3-分批正式迁移",
+    "phase4": "阶段4-收尾核对",
+}
+DEFAULT_STATE_FILE = "email-migration-state.json"
+
+
+def _default_state() -> dict:
+    return {"phase": "phase0", "done": {}, "pending_confirm": [], "notes": []}
+
+
+def load_state(path: Path) -> dict:
+    import json
+    if not path.exists():
+        return _default_state()
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return _default_state()
+
+
+def write_state(path: Path, state: dict) -> None:
+    import json
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _phase_to_index(p: str) -> int:
+    return PHASES.index(p) if p in PHASES else 0
 
 
 def _now_stamp() -> str:
@@ -116,7 +194,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
 
     # 官方三列在前，附加列按源文件顺序透传
     ordered = list(REQUIRED_COLUMNS) + [c for c in header if c not in REQUIRED_COLUMNS]
-    out_dir = Path(args.output) / "email-migration"
+    out_dir = Path(args.output) / _output_subdir()
     if args.dry_run:
         print(f"[OK] 校验通过（dry-run，不写文件）: {len(rows)} 行")
         return 0
@@ -146,7 +224,7 @@ def cmd_split(args: argparse.Namespace) -> int:
         print("[错误] --batch-size 必须为正整数")
         return 2
 
-    out_dir = Path(args.output) / "email-migration" / "batches"
+    out_dir = Path(args.output) / _output_subdir() / "batches"
     out_dir.mkdir(parents=True, exist_ok=True)
     total = 0
     for i, start in enumerate(range(0, len(rows), batch_size), start=1):
@@ -204,7 +282,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         over_size += flag_size
         over_count += flag_count
 
-    out_dir = Path(args.output) / "email-migration"
+    out_dir = Path(args.output) / _output_subdir()
     out = out_dir / f"analysis_report_{_now_stamp()}.csv"
     write_csv(out, list(report[0].keys()) if report else [identity_col, "EstimatedTotalCount", "EstimatedTotalSizeBytes", "OverSizeLimit", "OverCountLimit"], report)
     print(f"[OK] 分析报告: {out}")
@@ -259,7 +337,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
             "DeletedItemsNotCleared": "是" if deleted_not_cleared else "否",
         })
 
-    out_dir = Path(args.output) / "email-migration"
+    out_dir = Path(args.output) / _output_subdir()
     out = out_dir / f"verify_report_{_now_stamp()}.csv"
     write_csv(out, report_header, report)
     print(f"[OK] 核对报告: {out}")
@@ -283,17 +361,87 @@ def _mask_email(addr: str) -> str:
     return local[:1] + "***" + local[-1:] + "@" + domain
 
 
-def _parse_list_folder(line: bytes) -> str | None:
-    """解析 IMAP LIST 行，返回文件夹名（imaplib UTF-7 解码）。"""
+def _parse_list_folder(line: bytes) -> tuple[str, str] | None:
+    """解析 IMAP LIST 行，返回 (解码显示名, 原始编码名)。
+
+    select 必须用原始编码名（与服务端一致）；腾讯手写中文/特殊文件夹名用
+    imaplib 解码后仍含乱码，直接 select 会失败，因此 select 用 raw_name，
+    仅展示用解码名。
+    """
     text = line.decode("utf-8", "replace").strip()
     match = re.search(r'"([^"]*)"\s*$', text)
-    if match:
-        raw = match.group(1)
-        try:
-            return imaplib.UTF7.decode(raw)
-        except Exception:
-            return raw
-    return None
+    if not match:
+        return None
+    raw = match.group(1)
+    try:
+        decoded = imaplib.UTF7.decode(raw)
+    except Exception:
+        decoded = raw
+    return decoded, raw
+
+
+def _needs_quote(name: str) -> bool:
+    """IMAP select/status 的邮箱名参数含空格或特殊字符时必须加引号，否则报 parameters 错。"""
+    return any(ch in name for ch in ' \t"%*[]{}')
+
+
+
+def cmd_state(args: argparse.Namespace) -> int:
+    """读写交互式阶段状态：人工切会话时用共享的 output 状态文件记住进度。"""
+    path = Path(args.output) / _output_subdir() / "state" / args.state_file
+    state = load_state(path)
+
+    if args.phase and args.phase not in PHASES:
+        print(f"[错误] 未知阶段: {args.phase}（可选 {', '.join(PHASES)}）")
+        return 2
+
+    phase_changed = False
+    if args.phase:
+        state["phase"] = args.phase
+        phase_changed = True
+        print(f"[OK] 跳转至: {args.phase}（{PHASE_LABELS.get(args.phase, '')}）")
+
+    if args.advance:
+        # advance 标记当前 phase 完成（若本调用同时指定了 --phase，则完成新置的阶段）
+        state["done"][state["phase"]] = True
+        print(f"[OK] 完成阶段 {state['phase']}（{PHASE_LABELS.get(state['phase'], '')}）")
+        idx = _phase_to_index(state["phase"])
+        if idx + 1 < len(PHASES):
+            state["phase"] = PHASES[idx + 1]
+            print(f"[OK] 已推进至: {state['phase']}（{PHASE_LABELS.get(state['phase'], '')}）")
+        else:
+            print("[OK] 已到达最终阶段（收尾后由 verify 确认完成）")
+        phase_changed = True
+
+    if args.note:
+        state["notes"].append(args.note)
+        print(f"[OK] 已记录备注: {args.note}")
+
+    if args.todo:
+        t = args.todo
+        if t not in state["pending_confirm"]:
+            state["pending_confirm"].append(t)
+        print(f"[OK] 待确认: {t}")
+        write_state(path, state)
+        return 0
+
+    if args.confirm:
+        c = args.confirm
+        if c in state["pending_confirm"]:
+            state["pending_confirm"].remove(c)
+            print(f"[OK] 已确认: {c}")
+        else:
+            print(f"[提示] 待确认列表中没有: {c}")
+
+    write_state(path, state)
+    print(f"[OK] 状态文件: {path}")
+    print(f"[OK] 当前阶段: {state['phase']}（{PHASE_LABELS.get(state['phase'], '')}）")
+    print(f"[OK] 已完成阶段: {', '.join(state.get('done', {})) if state.get('done') else '无'}")
+    if state.get("pending_confirm"):
+        print(f"[提示] 待确认项: {', '.join(state['pending_confirm'])}")
+    else:
+        print("[OK] 无待确认项")
+    return 0
 
 
 def cmd_probe(args: argparse.Namespace) -> int:
@@ -315,32 +463,59 @@ def cmd_probe(args: argparse.Namespace) -> int:
             with imaplib.IMAP4_SSL(args.host, args.port, ssl_context=ctx, timeout=args.timeout) as m:
                 m.login(user, password)
                 _typ, folders = m.list()
-                folder_rows: list[tuple[str, int]] = []
+                folder_rows: list[tuple[str, int, int]] = []
                 for line in folders:
-                    name = _parse_list_folder(line)
-                    if not name:
+                    parsed = _parse_list_folder(line)
+                    if not parsed:
                         continue
+                    name, raw_name = parsed
+                    # imaplib select/status 不会自动加引号：名字含空格/特殊符时服务端报
+                    # 'BAD EXAMINE parameters'，需手动加双引号包裹（有空格等字符才需要）
+                    mailbox = f'"{raw_name}"' if _needs_quote(raw_name) else raw_name
                     try:
-                        typ, data = m.select(name, readonly=True)
+                        typ, data = m.select(mailbox, readonly=True)
                         if typ != "OK":
-                            details.append({"SourceEmail": user, "FolderName": name, "MailCount": "", "Status": f"SELECT 失败: {typ}"})
+                            details.append({"SourceEmail": user, "FolderName": name, "MailCount": "", "MailSizeBytes": "", "Status": f"SELECT 失败: {typ}"})
                             continue
                         count = int(data[0]) if data and data[0] else 0
-                        folder_rows.append((name, count))
+                        size = 0
+                        if count > 0:
+                            # 优先 STATUS (MESSAGES SIZE) 单次拿字节；失败/为 0 再逐封 RFC822.SIZE 求和
+                            try:
+                                _st, sndata = m.status(mailbox, "(MESSAGES SIZE)")
+                                sm = re.search(r"SIZE\s+(\d+)", sndata[0].decode("utf-8", "replace") if sndata else "")
+                                if sm:
+                                    size = int(sm.group(1))
+                            except Exception:
+                                size = 0
+                            if size == 0:
+                                try:
+                                    _t, nums = m.search(None, "ALL")
+                                    ids = (nums[0] or b"").split() if nums and nums[0] else []
+                                    for i in ids:
+                                        _rt, rdata = m.fetch(i, "(RFC822.SIZE)")
+                                        sm2 = re.search(r"RFC822.SIZE\s+(\d+)", rdata[0].decode("utf-8", "replace") if rdata else "")
+                                        if sm2:
+                                            size += int(sm2.group(1))
+                                except Exception:
+                                    size = 0
+                        folder_rows.append((name, count, size))
                     except Exception as e:
-                        details.append({"SourceEmail": user, "FolderName": name, "MailCount": "", "Status": f"SELECT 异常: {e.__class__.__name__}"})
+                        details.append({"SourceEmail": user, "FolderName": name, "MailCount": "", "MailSizeBytes": "", "Status": f"SELECT 异常: {e.__class__.__name__}"})
                 m.logout()
-            total = sum(c for _n, c in folder_rows)
-            print(f"[OK] {_mask_email(user)}: 文件夹 {len(folder_rows)} 个，邮件总数 {total}")
-            for name, count in folder_rows:
-                details.append({"SourceEmail": user, "FolderName": name, "MailCount": str(count), "Status": "OK"})
+            total = sum(c for _n, c, _s in folder_rows)
+            total_size = sum(s for _n, _c, s in folder_rows)
+            total_mb = total_size / 1024 / 1024
+            print(f"[OK] {_mask_email(user)}: 文件夹 {len(folder_rows)} 个，邮件总数 {total}，空间占用 {total_mb:.2f} MB")
+            for name, count, size in folder_rows:
+                details.append({"SourceEmail": user, "FolderName": name, "MailCount": str(count), "MailSizeBytes": str(size), "Status": "OK"})
         except (imaplib.IMAP4.error, OSError, ssl.SSLError) as e:
             print(f"[警告] {_mask_email(user)}: 连接失败（{e.__class__.__name__}）")
-            details.append({"SourceEmail": user, "FolderName": "", "MailCount": "", "Status": f"失败: {e.__class__.__name__}"})
+            details.append({"SourceEmail": user, "FolderName": "", "MailCount": "", "MailSizeBytes": "", "Status": f"失败: {e.__class__.__name__}"})
 
-    out_dir = Path(args.output) / "email-migration"
+    out_dir = Path(args.output) / _output_subdir()
     out = out_dir / f"probe_report_{_now_stamp()}.csv"
-    write_csv(out, ["SourceEmail", "FolderName", "MailCount", "Status"], details)
+    write_csv(out, ["SourceEmail", "FolderName", "MailCount", "MailSizeBytes", "Status"], details)
     print(f"[OK] 探测报告: {out}")
     print("[提示] 邮件总数受腾讯'收取范围'影响：若为'最近30天'，看到的只是近30天邮件")
     return 0
@@ -356,36 +531,46 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_generate = sub.add_parser("generate", help="生成 EXO 迁移 CSV（含密码，附加列透传）")
     p_generate.add_argument("csv", help="源 CSV 路径")
-    p_generate.add_argument("--output", default="output", help="产物根目录（默认 <cwd>/output）")
+    p_generate.add_argument("--output", default=_output_default(), help="产物根目录（可环境变量 EMAIL_MIGRATION_OUTPUT 覆盖）")
     p_generate.add_argument("--dry-run", action="store_true", help="只校验不写文件")
     p_generate.set_defaults(func=cmd_generate)
 
     p_split = sub.add_parser("split", help="按批拆分迁移 CSV")
     p_split.add_argument("csv", help="迁移 CSV 路径")
     p_split.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help=f"每批人数（默认 {DEFAULT_BATCH_SIZE}）")
-    p_split.add_argument("--output", default="output", help="产物根目录（默认 <cwd>/output）")
+    p_split.add_argument("--output", default=_output_default(), help="产物根目录（可环境变量 EMAIL_MIGRATION_OUTPUT 覆盖）")
     p_split.set_defaults(func=cmd_split)
 
     p_analyze = sub.add_parser("analyze", help="解析迁移分析统计，筛超限名单")
     p_analyze.add_argument("csv", help="Get-MigrationUserStatistics 导出的统计 CSV")
     p_analyze.add_argument("--size-gb", type=float, default=DEFAULT_SIZE_THRESHOLD_GB, help=f"大小阈值 GB（默认 {DEFAULT_SIZE_THRESHOLD_GB}）")
     p_analyze.add_argument("--count", type=int, default=DEFAULT_COUNT_THRESHOLD, help=f"条数阈值（默认 {DEFAULT_COUNT_THRESHOLD}，可调）")
-    p_analyze.add_argument("--output", default="output", help="产物根目录（默认 <cwd>/output）")
+    p_analyze.add_argument("--output", default=_output_default(), help="产物根目录（可环境变量 EMAIL_MIGRATION_OUTPUT 覆盖）")
     p_analyze.add_argument("--show-identities", action="store_true", help="在终端列出超限邮箱（默认只写入报告文件）")
     p_analyze.set_defaults(func=cmd_analyze)
 
     p_verify = sub.add_parser("verify", help="生成迁移后文件夹核对报告")
     p_verify.add_argument("csv", help="Get-MailboxFolderStatistics 导出的文件夹统计 CSV")
-    p_verify.add_argument("--output", default="output", help="产物根目录（默认 <cwd>/output）")
+    p_verify.add_argument("--output", default=_output_default(), help="产物根目录（可环境变量 EMAIL_MIGRATION_OUTPUT 覆盖）")
     p_verify.set_defaults(func=cmd_verify)
 
     p_probe = sub.add_parser("probe", help="连接源 IMAP，逐账号统计文件夹与邮件数（迁移前容量摸底）")
     p_probe.add_argument("csv", help="源 CSV 路径")
-    p_probe.add_argument("--host", default="imap.exmail.qq.com", help="源 IMAP 服务器（默认腾讯企业邮）")
-    p_probe.add_argument("--port", type=int, default=993, help="源 IMAP 端口（默认 993 SSL）")
+    p_probe.add_argument("--host", default=_imap_host_default(), help=f"源 IMAP 服务器（默认 {_imap_host_default()}，可环境变量覆盖）")
+    p_probe.add_argument("--port", type=int, default=_imap_port_default(), help=f"源 IMAP 端口（默认 {_imap_port_default()} SSL）")
     p_probe.add_argument("--timeout", type=int, default=30, help="单账号连接超时秒数（默认 30）")
-    p_probe.add_argument("--output", default="output", help="产物根目录（默认 <cwd>/output）")
+    p_probe.add_argument("--output", default=_output_default(), help="产物根目录")
     p_probe.set_defaults(func=cmd_probe)
+
+    p_state = sub.add_parser("state", help="读写交互式阶段状态（跨会话共享进度）")
+    p_state.add_argument("--output", default=_output_default(), help="产物根目录（可环境变量 EMAIL_MIGRATION_OUTPUT 覆盖）")
+    p_state.add_argument("--state-file", default=DEFAULT_STATE_FILE, help=f"状态文件名（默认 {DEFAULT_STATE_FILE}）")
+    p_state.add_argument("--phase", choices=PHASES, help=f"跳转到指定阶段: {'/'.join(PHASES)}")
+    p_state.add_argument("--advance", action="store_true", help="标记当前阶段完成并推进到下一阶段")
+    p_state.add_argument("--note", help="记录一条备注")
+    p_state.add_argument("--todo", help="新增一条待确认项")
+    p_state.add_argument("--confirm", help="标记一条待确认项已确认")
+    p_state.set_defaults(func=cmd_state)
 
     return parser
 

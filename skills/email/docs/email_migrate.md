@@ -121,6 +121,36 @@ $batchName = "TencentToM365_Full_" + (Get-Date -Format "yyyyMMdd_HHmm")
 New-MigrationBatch -Name $batchName -SourceEndpoint "TencentIMAPEndpoint" -CSVData $csvData -AutoStart -AllowUnknownColumnsInCsv $true
 ```
 
+**命令 10b：按时间范围迁移（用 `-ContentFilter`）**
+
+微软官方 `New-MigrationBatch` 的 `-ContentFilter` 参数**支持按 Received 时间筛选**，只有匹配条件的邮件才会被迁入。
+
+```powershell
+# 只迁移 2025/1/1 之后（含）接收的邮件：
+New-MigrationBatch -Name $batchName -SourceEndpoint "TencentIMAPEndpoint" -CSVData $csvData -AutoStart -AllowUnknownColumnsInCsv $true -ContentFilter "Received -ge '2025/1/1'" -ContentFilterLanguage "zh-CN"
+
+# 只迁移 2023/1/1 之前接收的邮件：
+New-MigrationBatch ... -ContentFilter "Received -le '2023/1/1'" ...
+
+# 迁移指定时间段（2022/1/1 ~ 2023/1/1）：
+New-MigrationBatch ... -ContentFilter "Received -gt '2022/1/1' -and Received -le '2023/1/1'" ...
+
+# 动态算最近 1 年（日期每天变化，用 PowerShell 计算而非手写死）：
+$yearAgo = (Get-Date).AddYears(-1).ToString("yyyy/M/d")   # 如 "2025/8/18"
+$filter = "Received -ge '$yearAgo'"                        # = "Received -ge '2025/8/18'"
+New-MigrationBatch ... -ContentFilter $filter ...          # 用变量传入
+```
+
+**`-ContentFilter` 语法要点（OPATH 过滤）：**
+- 只支持 `Received`（收件时间/邮件落箱时间）属性，**不支持 `Sent`（发件时间）**。
+- 支持操作符：`-gt`（大于）、`-ge`（大于等于）、`-lt`（小于）、`-le`（小于等于）、`-and`（且）、`-or`（或）。
+- 时间值用单引号包住，格式 `yyyy/M/d`（如 `'2023/1/1'`）。
+- `-ContentFilterLanguage` 指定字符串搜索的语言文化（如 `zh-CN`）。
+- 官方示例：`"Received -gt '8/23/2020'"`、`"Received -le '2019/01/01'"`、`"Received -gt '8/23/2015' -and Received -lt '8/23/2020'"`。
+- **注意**：`-ContentFilter` 是筛选「是否迁移某封邮件」，与 `-Analyze`（仅估算不迁移）相互独立；做按时间迁移时不要加 `-Analyze`。
+
+> ⚠️ **重要修正**：旧文档误以为“官方不支持按时间筛选、只能靠 imapsync”。经核对微软官方 `New-MigrationBatch` 文档，`-ContentFilter` 明确支持按 Received 时间筛选（只迁匹配邮件）。**商业标准版即使无云归档，也可直接对单邮箱用 `-ContentFilter` 做按时间迁移**（XML mapping 归档方案才需要云归档许可）。
+
 **命令 11：查看迁移任务状态与进度**
 
 ```powershell
@@ -206,7 +236,10 @@ Get-MigrationUser -BatchId "TencentToM365_Analysis" |
    - 只迁移收件箱及其他邮件文件夹，**联系人、日历、任务不迁移**，需另行方案（如腾讯企业邮通讯录导出后导入）。
 2. **MRM/存档策略**：微软迁移工具会把策略自动删除或移走的邮件标记为"缺失"。M365 新邮箱默认应用默认 MRM 策略，迁移期间建议移除目标邮箱保留策略（命令 3），迁移完成后再按需恢复。
 3. **超限判断不能只看大小**：同时筛选大小超 45GB 与数量超 50 万项（命令 9）。
-4. **按时间迁移的边界**：官方按时间能力分两层——分析统计（命令 8）与 XML mapping 分发到归档（需云归档许可）。商业标准版默认无归档许可，此时超限邮箱只能靠第三方工具 imapsync 按时间筛选兜底（见"第三方迁移工具"），旧邮件留在腾讯邮箱，需提前明确归属。
+4. **按时间迁移的边界（已修正）**：官方 `New-MigrationBatch` 的 `-ContentFilter` 参数**支持按 Received 时间筛选**，可对单个迁移批指定只迁指定时间段（见命令 10b），无需云归档也能用。分两层理解：
+   - **按时间筛选迁移**（单邮箱落在主邮箱）→ 用 `-ContentFilter`，商业标准版直接可用。
+   - **XML mapping 分发到归档**（把旧邮件分流到主+云归档邮箱）→ 需云归档许可（E3/E5 或 Exchange Online Archiving），商业标准版默认无此许可。
+   - imapsync 仅在需要官方不支持的细粒度筛选（按发件人/主题/Sent 时间）或需逐封对比时才作为兜底，不是“官方不支持按时间”的原因。
 5. **文件夹映射**：腾讯企业邮文件夹命名（中文名、自定义文件夹）与 M365 标准文件夹（Inbox、Sent Items 等）映射可能错位，迁移后需核对（命令 15），避免出现重复或异常文件夹。
 6. **分析批处理前提**：目标 EXO 邮箱必须已创建。
 
@@ -248,10 +281,11 @@ Get-MigrationUser -BatchId "TencentToM365_Analysis" |
 
 ---------------
 
-## 第三方迁移工具
+## 第三方迁移工具（imapsync，官方 `-ContentFilter` 的兜底）
 
 ```bash
 imapsync --host1 imap.exmail.qq.com --user1 your_tencent@company.com --password1 '你的腾讯邮箱密码' \
          --host2 outlook.office365.com --user2 your_microsoft@company.com --password2 '你的微软邮箱密码' \
-         --ssl1 --ssl2
+         --ssl1 --ssl2     # 按需追加时间过滤
+# 注意：imapsync --search 是 IMAP SEARCH 语法（如 SINCE 1-Jan-2022），与官方 -ContentFilter 的 OPATH 语法完全不同，勿混用。
 ```
