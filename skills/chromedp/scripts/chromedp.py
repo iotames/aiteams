@@ -56,9 +56,36 @@ def chromedp_find_chrome(browser="auto"):
     Windows 标准路径找不到时回退到 ``where`` 命令。
     返回（启动命令前缀列表, 可执行文件路径），找不到时抛出 FileNotFoundError。
     """
-    browser = browser.lower().strip()
-    if browser not in ("auto", "chrome", "edge"):
-        raise ValueError(f"browser must be 'auto', 'chrome', or 'edge', got {browser!r}")
+    # ── 参数规范化：先折叠大小写/空白，再识别是否为标准类型名 ──
+    # 否则传 browser="Chrome"（大写）会被误判为自定义路径。
+    if isinstance(browser, str):
+        normalized = browser.strip().lower()
+    else:
+        normalized = ""
+
+    if normalized in ("auto", "chrome", "edge"):
+        browser = normalized
+    else:
+        # ── 自定义路径优先：browser 可以是可执行文件路径或所在目录 ──
+        # 覆盖非标准安装：deepin/麒麟打包（/opt/apps/...）、容器、自定义目录等。
+        if not isinstance(browser, str) or not browser.strip():
+            raise ValueError(
+                f"browser must be 'auto', 'chrome', 'edge' or an executable path, got {browser!r}")
+        candidate = os.path.expanduser(browser.strip())
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            # 是（可执行）文件：直接返回；deepin/麒麟等打包版容器内
+            # 常需 --no-sandbox，由 chromedp_launch 统一追加。
+            return ([], candidate)
+        if os.path.isdir(candidate):
+            for name in ("chrome", "google-chrome", "chromium", "chromium-browser",
+                         "microsoft-edge", "msedge", "chrome.exe", "msedge.exe"):
+                p = os.path.join(candidate, name)
+                if os.path.isfile(p) and os.access(p, os.X_OK):
+                    return ([], p)
+        if os.path.isfile(candidate):
+            # 存在但不可执行：给出更明确的报错，避免最后用非法文件去启动。
+            raise ValueError(f"browser file is not executable: {candidate!r}")
+        raise ValueError(f"browser path not found: {candidate!r}")
 
     # ── Linux 路径（仅 Chrome/Chromium）──
     if browser in ("auto", "chrome"):
@@ -68,6 +95,8 @@ def chromedp_find_chrome(browser="auto"):
             "/usr/bin/chromium-browser",
             "/snap/bin/chromium",
             "/opt/google/chrome/google-chrome",
+            "/opt/apps/cn.google.chrome-pre/files/google/chrome/chrome",  # deepin 打包
+            "/opt/apps/cn.google.chrome/files/google/chrome/chrome",      # 麒麟/linglong 安装
         ]
         for lp in linux_candidates:
             if os.path.exists(lp):
@@ -138,6 +167,8 @@ def chromedp_find_chrome(browser="auto"):
         "(e.g. /usr/bin/google-chrome, snap, linglong, custom path on Linux; "
         "Chrome or Edge standard install path on Windows)."
     )
+
+
 def chromedp_launch(
     url="http://127.0.0.1:5000",
     port=9222,
@@ -156,10 +187,13 @@ def chromedp_launch(
         extra_flags: 附加命令行参数。
         timeout: 每次等待调试端口就绪的秒数。
         headless: 强制无头模式（否则按显示环境自动判断）。
-        browser: ``"auto"``（默认）、``"chrome"`` 或 ``"edge"``。
+        browser: ``"auto"``（默认）、``"chrome"`` 或 ``"edge"``，也可传
+                 可执行文件路径或所在目录（自定义/非标准安装）。
 
     自动检测显示环境：Windows 桌面默认有头模式；Linux 检查 DISPLAY/
     WAYLAND_DISPLAY 环境变量。传 headless=True 可强制无头。
+    deepin/麒麟打包路径（"/opt/apps/..."）自动追加 --no-sandbox，避免容器
+    或非交互环境因 seccomp 权限启动失败。
     调试端口最多重试连接 3 次；返回 Popen 句柄，调用方负责结束进程。
     """
     if user_data_dir is None:
@@ -184,6 +218,10 @@ def chromedp_launch(
         "--disable-background-networking",
         "--disable-gpu-driver-bug-workarounds",
     ]
+    # deepin/麒麟等打包安装（/opt/apps/...）在容器或非交互环境常因
+    # seccomp/sandbox 权限失败而无法启动，为这类打包路径自动追加 --no-sandbox。
+    if "/opt/apps/" in binary:
+        flags.append("--no-sandbox")
     if use_headless:
         flags.append("--headless=new")
     flags.append(url)

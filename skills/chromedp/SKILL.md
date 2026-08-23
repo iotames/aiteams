@@ -33,10 +33,12 @@ from scripts.chromedp import chromedp_find_chrome
 prefix, binary_path = chromedp_find_chrome()          # 自动检测
 prefix, binary_path = chromedp_find_chrome(browser="chrome")  # 指定 Chrome
 prefix, binary_path = chromedp_find_chrome(browser="edge")    # 指定 Edge
+prefix, binary_path = chromedp_find_chrome(browser="/opt/apps/cn.google.chrome-pre/files/google/chrome/chrome")  # 自定义路径（deepin/麒麟打包、容器等非标准安装）
+prefix, binary_path = chromedp_find_chrome(browser="/opt/apps/cn.google.chrome-pre")  # 也可传所在目录，自动找常见浏览器二进制名
 ```
 
-自动检测系统已安装的 Chrome/Edge（支持 Linux 和 Windows）。
-使用 `browser="chrome"` 或 `browser="edge"` 指定浏览器类型。
+自动检测系统已安装的 Chrome/Edge（支持 Linux 和 Windows，含 deepin `/opt/apps/cn.google.chrome-pre/` 等非标准路径）。
+使用 `browser="chrome"` 或 `browser="edge"` 指定浏览器类型；**`browser` 也可直接传可执行文件路径或所在目录**（技能找不到时先试这个，再问用户）。传目录时自动在目录内查找常见浏览器二进制名（含 `microsoft-edge`），Windows 下兼容 `chrome.exe`/`msedge.exe`；传可执行文件路径时须为可执行文件。
 如果找不到，**必须问用户**，不要直接放弃。
 
 ### 2. 启动 Chrome
@@ -52,12 +54,14 @@ proc = chromedp_launch(
 )
 proc = chromedp_launch(browser="edge")  # 指定用 Edge
 proc = chromedp_launch(browser="chrome")  # 指定用 Chrome
+proc = chromedp_launch(browser="/opt/apps/cn.google.chrome-pre/files/google/chrome/chrome")  # 自定义路径，同 find_chrome
 ```
 
 - 桌面环境（Windows）默认有头模式，用户可观察浏览器操作
 - Linux 自动检测 `DISPLAY`/`WAYLAND_DISPLAY`，有显示器时有头
 - 传 `headless=True` 强制无头
 - 可传 `browser="chrome"` 或 `browser="edge"` 指定浏览器
+- deepin/麒麟打包路径（`/opt/apps/...`）自动追加 `--no-sandbox`，避免容器/sandbox 权限问题
 - 最大重试 3 次等待调试端口就绪
 
 ### 3. 连接 CDP 并调试
