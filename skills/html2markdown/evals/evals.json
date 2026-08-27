@@ -1,0 +1,25 @@
+{
+  "skill_name": "html2markdown",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "把 https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/codex 这个网页下载转成 Markdown，叫 DEEPSEEK.md",
+      "expected_output": "在用户指定路径生成 DEEPSEEK.md，含完整正文：标题层级、代码块（bash/powershell/json/toml）、config.toml 字段表格、历史会话提示框，链接为绝对地址",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "把 /tmp/simple_test.html 转成 Markdown 文件",
+      "expected_output": "在 /tmp 生成 simple_test.md，包含 # 标题一、加粗/斜体、代码块 def hello()、两列表格、无序列表，不含导航与页脚",
+      "files": [
+        "/tmp/simple_test.html"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "把这个网页存下来：https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/codex",
+      "expected_output": "识别为网页转 Markdown 任务，生成 .md 文件（默认名 codex.md），正文完整且无导航/脚本噪音",
+      "files": []
+    }
+  ]
+}
