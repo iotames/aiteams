@@ -4,6 +4,7 @@
 - 执行长命令/长查询 → rules/long-command-reporting.md
 - 写代码/脚本 → rules/coding-standards.md
 - Git 提交前 → rules/git-commit-check.md
+- Git 推送（多远程须全部成功、失败每分钟重试）→ rules/git-push-retry.md
 - 查本地软件 → rules/cli-conventions.md
 - 定时/后台/cron 等自动化任务 → rules/no-token-waste.md
 - 启动端口监听或其他守护进程 → rules/background-processes.md
