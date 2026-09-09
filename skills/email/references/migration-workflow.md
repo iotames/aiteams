@@ -29,6 +29,8 @@
 |------|----------|--------|
 | `validate`/`generate`/`split` CSV | 本地文件 | agent 独立 |
 | `probe` 源邮箱摸底（邮件数/占用字节） | 源 IMAP + 源密码 | agent 独立 |
+| `check` 源账号登录可用性验证（登录即登出，不统计邮件；适合改密后批量验凭据） | 源 IMAP + 源密码 | agent 独立 |
+| `backfill` 汇总表统计列回填源清单（按 UserName=email 匹配） | 本地文件 | agent 独立 |
 | `analyze` / `verify` | 人导出的 CSV | agent 独立（消费导出） |
 | 一切 EXO 命令 | M365 目标侧 | **必须人工**（已登录 PowerShell） |
 | `state` | 本地状态文件 | agent 独立 |
@@ -114,7 +116,36 @@ Test-MigrationServerAvailability -IMAP -RemoteServer "imap.exmail.qq.com" -Port 
 python skills/email/scripts/email_migration.py probe password.csv
 ```
 
-`probe` 会逐账号列出文件夹与邮件数并写报告到 output/email-migration/。报告为 probe_report_*.csv，共 5 列：`SourceEmail, FolderName, MailCount, MailSizeBytes, Status`（MailSizeBytes 为各文件夹占用字节；Status 为 OK / SELECT 失败 / 失败:异常名，账号级连接失败时 FolderName 为空）。邮件总数明显偏小（如只有几十封）通常说明腾讯"收取范围"仍是"最近 30 天"，需先改设置再迁移。
+`probe` 会逐账号列出文件夹与邮件数并写报告到 output/email-migration/。报告为 probe_report_*.csv，共 5 列：`SourceEmail, FolderName, MailCount, MailSizeBytes, Status`（MailSizeBytes 为各文件夹占用字节；Status 为 OK / SELECT 失败 / SELECT 异常 / 失败:异常名:服务端返回信息，账号级连接失败时 FolderName 为空）。邮件总数明显偏小（如只有几十封）通常说明腾讯"收取范围"仍是"最近 30 天"，需先改设置再迁移。
+
+probe 同时生成逐账号汇总表 `email_check_success_<时间戳>.csv`（与探测报告同时间戳配对）：
+
+- 列：`email, total_count, total_size, size_text(MB)`；登录失败的账号三项留空，失败原因见 probe_report
+- probe 只需源账号（UserName/Password），不校验目标邮箱列；加 `--manifest password.csv` 时汇总表额外带 `EmailAddress`（目标邮箱）列
+- 密码列永不进入任何产物；日志同步落盘 `output/email-migration/logs/probe_*.log`，运行中可 tail 观测实时进度
+
+把汇总表统计列回填源清单（如给 password.csv 补 total_count/total_size/size_text(MB)，按 UserName=email 匹配——去首尾空格、忽略大小写；匹配不到或探测失败的行统计列留空，幂等可重跑）：
+
+```bash
+python skills/email/scripts/email_migration.py backfill output/email-migration/email_check_success_<时间戳>.csv password.csv
+```
+
+### 账号可用性验证（check，不统计邮件）
+
+改密码后或迁移前想快速确认"账号密码能不能登录"，不需要 probe 的完整摸底时用 `check`：登录成功即登出，不列文件夹、不统计邮件，速度远快于 probe。支持一次传多个 CSV，exit code：0=全部通过，2=有失败账号，1=个别 CSV 校验失败被跳过（其余文件照常验证，报告中不含被跳过文件的账号）；跳过与失败并存时 exit 1 优先——先修文件，再全量重测。
+
+```bash
+python skills/email/scripts/email_migration.py check password-1.csv password-2.csv password-3.csv password-4.csv
+```
+
+产物为 `check_report_<时间戳>.csv`（列：`SourceFile, EmailAddress, UserName, Status, Detail`；密码不进任何产物）。日志同步落盘 `output/email-migration/logs/check_*.log`，运行中可 tail 观测实时进度。**注意：check 只出报告，不会移动或归类任何账号**——失败账号放进哪个名单、批次如何调整，一律由用户决定。
+
+判定细则（依据 2026-09 实测）：
+
+- **判定流程为 LOGIN → SELECT INBOX（只读）→ LOGOUT**，以 SELECT INBOX 能否打开为准——这是迁移搬运邮件的必要条件
+- **LOGIN 后任何阶段断连（socket EOF）＝ IMAP/SMTP 服务未开启**：腾讯对未开启账号 LOGIN/NOOP/SELECT 都会应答，会话收尾时才掐线；脚本判为"会话被拒"并提示开启服务，开启后重测 LOGOUT 正常即通过
+- **LOGIN 直接被拒**（腾讯合并报错 "Login fail. Account is abnormal..."）：账号异常/IMAP 未开启/密码错误（安全登录需客户端专用密码）/频率限制，脚本打印排查清单
+- 网络类错误（timeout/refused）单独提示查网络
 
 ### 迁移终结点与 MRM 策略
 
@@ -224,6 +255,14 @@ Get-MigrationUser -BatchId $batchName | Get-MigrationUserStatistics |
 
 监控：轮询 `Get-MigrationBatch` 直到 Status 为 Completed 或 Failed。失败用户通过 Exchange 管理中心查看具体错误（https://admin.cloud.microsoft/exchange#/migrationbatch），处理完错误后单独重试或并入下一批。
 
+**增量同步机制（大邮箱必读，10GB+ 首轮慢属正常）**：
+
+- 首轮全量同步完成后，服务端**每 24 小时自动做一次增量同步**，只搬源端新增/有变化的邮件，不会整箱重传；该循环持续到对批执行 Complete（收尾）或删除批次为止。
+- 大邮箱首轮同步数小时属正常，**耐心等、勿删批重建**——删批重跑同一账号会从头再来全量，且可能产生重复项。
+- 增量按条目对比，**不是按时间戳过滤**；`-ContentFilter` 只作用于首轮全量范围。
+- **删除不同步**：源端删除/标记改动不反映到目标，目标只增不减。
+- 收尾顺序：全量 Synced → 观察 1-2 次增量 → 切 MX → 最后一次增量兜底 → `Complete-MigrationBatch` 收尾（见阶段 4）。
+
 ### 阶段 3b：按时间范围只迁最近 N 年（`-ContentFilter`）
 
 对于超限/需裁剪的邮箱，可用官方 `New-MigrationBatch` 的 `-ContentFilter` 参数**按 Received 时间筛选**，只迁移匹配时段的邮件。此能力商业标准版直接可用，**不依赖云归档许可**。
@@ -248,6 +287,13 @@ New-MigrationBatch -Name $batchName -SourceEndpoint "TencentIMAPEndpoint" -CSVDa
 - 此参数与 `-Analyze` 相互独立：做按时间迁移时**不要加 `-Analyze`**。
 
 ## 6. 阶段 4：收尾核对
+
+```powershell
+# 确认各批全量同步完成（Status: Completed/Synced）且 MX 已切换、观察过 1-2 次增量后，
+# 逐批执行收尾（Complete-MigrationBatch 会停止后续增量同步，务必最后一步再做）
+Get-MigrationBatch | Format-Table Identity, Status, LastSyncedDateTime
+Complete-MigrationBatch -Identity <批名> -Confirm:$false
+```
 
 ```powershell
 # 导出文件夹统计到共享目录，用脚本生成核对报告
@@ -277,10 +323,16 @@ python skills/email/scripts/email_migration.py verify output/email-migration/fol
 
 ```powershell
 # 删除所有测试/历史迁移批（终态批安全；Removing 后台清理中，稍后消失属正常）
+# 注意：实测 Stopped 批用管道方式删除可能静默失效（不报错也不删），优先用网页后台手动删
 Get-MigrationBatch | Where-Object {
         $_.Status -in @("Completed","CompletedWithErrors","Failed","Stopped","Removing")
-    } | Remove-MigrationBatch -Confirm:$false
+    } | ForEach-Object {
+        Write-Host "正在删除: $($_.Identity)"
+        Remove-MigrationBatch -Identity $_.Identity -Confirm:$false
+    }
 # 删除后状态先变 Removing 再过几分钟消失，不是删不干净，勿重复删/报错
+# 管道删除无效时（命令执行但批次仍在），改用网页后台手动删除：
+#   https://admin.cloud.microsoft/exchange#/migrationbatch → 选中批次 → 删除
 # 注意：终结点 TencentIMAPEndpoint 不在批处理里，勿用此命令；保留供后续迁移复用
 ```
 

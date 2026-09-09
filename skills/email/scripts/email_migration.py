@@ -6,6 +6,9 @@
   generate  生成 EXO 迁移 CSV（Password=源密码，附加列如 TargetEmailPassword 透传）
   split     按批拆分迁移 CSV（默认 50 人/批，供小批量验证与分批迁移）
   analyze   解析分析批处理统计，筛超限名单（默认 >45GB 或 >50 万条）
+  probe     连接源 IMAP 逐账号摸底（文件夹/邮件数/占用字节），附逐账号汇总表
+  check     只验证源 IMAP 登录可用性（登录即登出，不统计邮件），支持多个 CSV
+  backfill  把 probe 汇总表统计列按 UserName=email 回填源清单
   verify    迁移后核对报告（文件夹统计，含已删除邮件覆盖情况）
   state     读写阶段状态文件，供交互式工作流在人工切会话时共享进度
 
@@ -133,24 +136,32 @@ def write_csv(path: Path, header: list[str], rows: list[dict[str, str]]) -> None
         writer.writerows(rows)
 
 
-def validate(path: Path, *, quiet: bool = False) -> tuple[list[str], list[dict[str, str]], list[str]]:
-    """校验源 CSV，返回 (表头, 行, 错误列表)。错误列表非空时调用方应终止。"""
+def validate(
+    path: Path, *, quiet: bool = False, ignore_target_email: bool = False
+) -> tuple[list[str], list[dict[str, str]], list[str]]:
+    """校验源 CSV，返回 (表头, 行, 错误列表)。错误列表非空时调用方应终止。
+
+    ignore_target_email: 跳过 EmailAddress 的空值/重复校验（源 IMAP 探测等
+    只需 UserName/Password 的场景，目标邮箱未填不应阻断）。
+    """
     header, rows = load_csv(path)
     errors: list[str] = []
 
-    missing = [c for c in REQUIRED_COLUMNS if c not in header]
+    required = [c for c in REQUIRED_COLUMNS if not (ignore_target_email and c == "EmailAddress")]
+    missing = [c for c in required if c not in header]
     if missing:
         errors.append(f"缺少必填列: {', '.join(missing)}")
         return header, rows, errors
 
-    empty_required = [c for c in REQUIRED_COLUMNS if any(not (r.get(c) or "").strip() for r in rows)]
+    empty_required = [c for c in required if any(not (r.get(c) or "").strip() for r in rows)]
     if empty_required:
         errors.append(f"存在必填列空值: {', '.join(empty_required)}")
 
-    dup_target = _find_duplicates(r.get("EmailAddress", "").strip() for r in rows)
+    if not ignore_target_email:
+        dup_target = _find_duplicates(r.get("EmailAddress", "").strip() for r in rows)
+        if dup_target:
+            errors.append(f"EmailAddress 重复 {len(dup_target)} 项")
     dup_source = _find_duplicates(r.get("UserName", "").strip() for r in rows)
-    if dup_target:
-        errors.append(f"EmailAddress 重复 {len(dup_target)} 项")
     if dup_source:
         errors.append(f"UserName 重复 {len(dup_source)} 项")
 
@@ -411,16 +422,6 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 0
 
 
-def _mask_email(addr: str) -> str:
-    """终端脱敏显示：本地部分只保留首尾字符，域名完整。"""
-    local, _, domain = addr.partition("@")
-    if not domain:
-        return "***"
-    if len(local) <= 2:
-        return local[0] + "***@" + domain
-    return local[:1] + "***" + local[-1:] + "@" + domain
-
-
 def _parse_list_folder(line: bytes) -> tuple[str, str] | None:
     """解析 IMAP LIST 行，返回 (解码显示名, 原始编码名)。
 
@@ -450,6 +451,67 @@ def _needs_quote(name: str) -> bool:
     """IMAP select/status 的邮箱名参数含空格或特殊字符时必须加引号，否则报 parameters 错。"""
     return any(ch in name for ch in ' \t"%*[]{}')
 
+
+
+def cmd_backfill(args: argparse.Namespace) -> int:
+    """把 probe 汇总表（email_check_success_*.csv）的统计列回填到源清单 CSV。
+
+    按 源清单.UserName = 汇总表.email 匹配（去首尾空格、忽略大小写）；
+    匹配不到或探测失败的行统计列留空。只增补统计列，不改动原有列（含密码），文件就地更新。
+    """
+    summary_path = Path(args.summary)
+    fn = Path(args.csv)
+    for p in (summary_path, fn):
+        if not p.is_file():
+            print(f"[错误] 文件不存在: {p}")
+            return 1
+    try:
+        with summary_path.open(encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            summary = list(reader)
+            summary_fields = list(reader.fieldnames or [])
+    except OSError as e:
+        print(f"[错误] 汇总表读取失败: {e}")
+        return 1
+    if "email" not in summary_fields:
+        print(f"[错误] 汇总表缺少 email 列（实际表头: {', '.join(summary_fields) or '空'}）: {summary_path}")
+        return 1
+    data = {
+        (r.get("email") or "").strip().lower(): r
+        for r in summary
+    }
+    try:
+        with fn.open(encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            fieldnames = list(reader.fieldnames or [])
+            rows = list(reader)
+    except OSError as e:
+        print(f"[错误] 源清单读取失败: {e}")
+        return 1
+    if not rows:
+        print(f"[错误] {fn} 无数据行")
+        return 1
+    if any(None in r for r in rows):
+        # 行字段多于表头时 DictWriter 会中途失败，就地更新会把源文件截断，必须先中止
+        print(f"[错误] {fn} 存在列数多于表头的行，已中止回填（请先修正该 CSV）")
+        return 1
+    stat_cols = ["total_count", "total_size", "size_text(MB)"]
+    header = fieldnames + [c for c in stat_cols if c not in fieldnames]
+    filled = 0
+    for r in rows:
+        d = data.get((r.get("UserName") or "").strip().lower())
+        if d and d.get("total_count"):  # "0" 亦有效（0 封邮箱照常回填）；空串=探测失败，留空
+            for c in stat_cols:
+                r[c] = d.get(c, "")
+            filled += 1
+    with fn.open("w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=header)
+        w.writeheader()
+        w.writerows(rows)
+    print(f"[OK] 回填 {filled}/{len(rows)} 行 → {fn}")
+    if filled < len(rows):
+        print(f"[提示] {len(rows) - filled} 行未回填（汇总表无匹配或该账号探测失败，统计列留空）")
+    return 0
 
 
 def cmd_state(args: argparse.Namespace) -> int:
@@ -510,10 +572,44 @@ def cmd_state(args: argparse.Namespace) -> int:
     return 0
 
 
+def _fetch_size_sum(m: imaplib.IMAP4_SSL, count: int) -> int:
+    """统计当前已 select 文件夹的邮件字节总量。
+
+    FETCH 1:* (RFC822.SIZE) 是 RFC 3501 强制支持项，腾讯 IMAP 必然可用，
+    整个文件夹一次网络往返；仅当个别服务端对超大范围报错时，才退到分批区间。
+    返回 0 表示统计失败（count>0 却拿不到尺寸）。
+    """
+    def _sum(rdata) -> int:
+        text = b" ".join(d for d in rdata if isinstance(d, bytes)).decode("utf-8", "replace")
+        return sum(int(x) for x in re.findall(r"RFC822\.SIZE\s+(\d+)", text))
+
+    try:
+        _rt, rdata = m.fetch("1:*", "(RFC822.SIZE)")
+        return _sum(rdata)
+    except Exception:
+        pass
+    total = 0
+    batch_size = 2000
+    try:
+        for start in range(1, count + 1, batch_size):
+            end = min(start + batch_size - 1, count)
+            _rt, rdata = m.fetch(f"{start}:{end}", "(RFC822.SIZE)")
+            total += _sum(rdata)
+    except (imaplib.IMAP4.error, OSError, ssl.SSLError):
+        # 分批也拿不到：按约定返回 0=统计失败，上层保留邮件数、尺寸记 0，不误标 SELECT 异常
+        return 0
+    return total
+
+
 def cmd_probe(args: argparse.Namespace) -> int:
     """连接源 IMAP 服务器，逐账号统计文件夹与邮件数（密码仅在内存，不落盘）。"""
     src = Path(args.csv)
-    _header, rows, errors = validate(src, quiet=True)
+    # probe 是迁移前摸底，只依赖源账号（UserName/Password），目标邮箱列无需填写
+    try:
+        _header, rows, errors = validate(src, quiet=True, ignore_target_email=True)
+    except (OSError, ValueError, csv.Error) as e:
+        print(f"[错误] 源 CSV 读取失败（{e.__class__.__name__}: {e}），未执行探测：{src}")
+        return 1
     if errors:
         print("[错误] 源 CSV 校验失败，未执行探测：")
         for e in errors:
@@ -522,9 +618,11 @@ def cmd_probe(args: argparse.Namespace) -> int:
 
     ctx = ssl.create_default_context()
     details: list[dict[str, str]] = []
-    for r in rows:
+    n_total = len(rows)
+    for idx, r in enumerate(rows, 1):
         user = (r.get("UserName") or "").strip()
         password = (r.get("Password") or "").strip()
+        print(f"[{idx}/{n_total}] {user}: 探测中…", flush=True)
         try:
             with imaplib.IMAP4_SSL(args.host, args.port, ssl_context=ctx, timeout=args.timeout) as m:
                 m.login(user, password)
@@ -544,47 +642,186 @@ def cmd_probe(args: argparse.Namespace) -> int:
                             details.append({"SourceEmail": user, "FolderName": name, "MailCount": "", "MailSizeBytes": "", "Status": f"SELECT 失败: {typ}"})
                             continue
                         count = int(data[0]) if data and data[0] else 0
-                        size = 0
-                        if count > 0:
-                            # 优先 STATUS (MESSAGES SIZE) 单次拿字节；失败/为 0 再逐封 RFC822.SIZE 求和
-                            try:
-                                _st, sndata = m.status(mailbox, "(MESSAGES SIZE)")
-                                sm = re.search(r"SIZE\s+(\d+)", sndata[0].decode("utf-8", "replace") if sndata else "")
-                                if sm:
-                                    size = int(sm.group(1))
-                            except Exception:
-                                size = 0
-                            if size == 0:
-                                try:
-                                    _t, nums = m.search(None, "ALL")
-                                    ids = (nums[0] or b"").split() if nums and nums[0] else []
-                                    for i in ids:
-                                        _rt, rdata = m.fetch(i, "(RFC822.SIZE)")
-                                        sm2 = re.search(r"RFC822.SIZE\s+(\d+)", rdata[0].decode("utf-8", "replace") if rdata else "")
-                                        if sm2:
-                                            size += int(sm2.group(1))
-                                except Exception:
-                                    size = 0
+                        size = _fetch_size_sum(m, count) if count > 0 else 0
                         folder_rows.append((name, count, size))
+                        print(f"    - {name}: {count} 封 / {size/1048576:.1f} MB", flush=True)
                     except Exception as e:
                         details.append({"SourceEmail": user, "FolderName": name, "MailCount": "", "MailSizeBytes": "", "Status": f"SELECT 异常: {e.__class__.__name__}"})
                 m.logout()
             total = sum(c for _n, c, _s in folder_rows)
             total_size = sum(s for _n, _c, s in folder_rows)
             total_mb = total_size / 1024 / 1024
-            print(f"[OK] {_mask_email(user)}: 文件夹 {len(folder_rows)} 个，邮件总数 {total}，空间占用 {total_mb:.2f} MB")
+            print(f"[OK] {user}: 文件夹 {len(folder_rows)} 个，邮件总数 {total}，空间占用 {total_mb:.2f} MB")
             for name, count, size in folder_rows:
                 details.append({"SourceEmail": user, "FolderName": name, "MailCount": str(count), "MailSizeBytes": str(size), "Status": "OK"})
-        except (imaplib.IMAP4.error, OSError, ssl.SSLError) as e:
-            print(f"[警告] {_mask_email(user)}: 连接失败（{e.__class__.__name__}）")
-            details.append({"SourceEmail": user, "FolderName": "", "MailCount": "", "MailSizeBytes": "", "Status": f"失败: {e.__class__.__name__}"})
+        except (imaplib.IMAP4.error, OSError, ssl.SSLError, ValueError) as e:
+            # ValueError 同 check：账号/密码含非 ASCII 字符时 imaplib 内部直接抛编码错
+            # 密码不参与任何输出；错误详情只含服务端返回文本
+            print(f"[警告] {user}: 连接失败（{e.__class__.__name__}: {e}）")
+            details.append({"SourceEmail": user, "FolderName": "", "MailCount": "", "MailSizeBytes": "", "Status": f"失败: {e.__class__.__name__}: {e}"})
 
     out_dir = Path(args.output) / _output_subdir()
     out = out_dir / f"probe_report_{_now_stamp()}.csv"
+    failed = [d["SourceEmail"] for d in details if d["Status"].startswith("失败")]
+    if failed:
+        print(f"[提示] 失败 {len(failed)}/{n_total} 个: {', '.join(failed)}")
     write_csv(out, ["SourceEmail", "FolderName", "MailCount", "MailSizeBytes", "Status"], details)
+    # 逐账号汇总表（不含密码），与探测报告同时间戳配对；失败账号拿不到数据，三项留空。
+    # 提供 --manifest（password.csv 类源清单）时补 EmailAddress（目标邮箱）列；密码列永不出现在产物中。
+    stamp = out.stem.removeprefix("probe_report_")
+    target_by_user: dict[str, str] = {}
+    if getattr(args, "manifest", None):
+        try:
+            _mh, _mrows, _merrs = validate(Path(args.manifest), quiet=True, ignore_target_email=True)
+        except OSError as e:
+            print(f"[警告] manifest 读取失败（{e}），汇总表将不含 EmailAddress 列")
+            _mh, _mrows, _merrs = [], [], ["读取失败"]
+        if _merrs or "EmailAddress" not in _mh:
+            _why = "；".join(_merrs) or "缺少 EmailAddress 列"
+            print(f"[警告] manifest 不可用（{_why}），忽略之，汇总表将不含 EmailAddress 列")
+            _mrows = []
+        target_by_user = {
+            (r.get("UserName") or "").strip().lower(): (r.get("EmailAddress") or "").strip()
+            for r in _mrows
+        }
+    acct: dict[str, dict[str, int]] = {}
+    for d in details:
+        if d["Status"] != "OK":
+            continue
+        a = acct.setdefault(d["SourceEmail"], {"count": 0, "size": 0})
+        a["count"] += int(d["MailCount"] or 0)
+        a["size"] += int(d["MailSizeBytes"] or 0)
+    summary_header = ["EmailAddress", "email", "total_count", "total_size", "size_text(MB)"] if target_by_user else ["email", "total_count", "total_size", "size_text(MB)"]
+    summary_out = out_dir / f"email_check_success_{stamp}.csv"
+    summary_rows = []
+    for user in (r.get("UserName", "").strip() for r in rows):
+        if not user:
+            continue
+        row = {
+            "email": user,
+            "total_count": str(acct[user]["count"]) if user in acct else "",
+            "total_size": str(acct[user]["size"]) if user in acct else "",
+            "size_text(MB)": f"{acct[user]['size'] / 1048576:.2f}" if user in acct else "",
+        }
+        if target_by_user:
+            row["EmailAddress"] = target_by_user.get(user.lower(), "")
+        summary_rows.append(row)
+    write_csv(summary_out, summary_header, summary_rows)
+    print(f"[OK] 汇总表: {summary_out}")
     print(f"[OK] 探测报告: {out}")
     print("[提示] 邮件总数受腾讯'收取范围'影响：若为'最近30天'，看到的只是近30天邮件")
     return 0
+
+
+def _login_fail_hint(detail: str) -> str:
+    """把 LOGIN 失败的服务端报错翻译成排查方向（腾讯合并多种原因为一个报错）。"""
+    if "Login fail" in detail:
+        return ("可能原因（按腾讯后台排查顺序）："
+                "1) 账号状态异常/被禁用；"
+                "2) 客户端设置未开启 IMAP/SMTP 服务；"
+                "3) 密码错误（若开启'安全登录'，IMAP 须用客户端专用密码，网页密码无效）；"
+                "4) 登录频率限制（稍等冷却后重测）")
+    if "timeout" in detail.lower() or "refused" in detail.lower() or "unreachable" in detail.lower():
+        return "可能原因：网络不通或服务器地址/端口有误（也与账号无关，先查网络）"
+    if "ascii" in detail.lower() and "encode" in detail.lower():
+        return "可能原因：账号或密码含非 ASCII 字符（如中文/全角），无法经 IMAP LOGIN 发送，请确认是否用错密码"
+    return ""
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    """逐账号只验证源 IMAP 登录可用性（登录即登出），不统计邮件，用于改密后快速验凭据。"""
+    ctx = ssl.create_default_context()
+    results: list[dict[str, str]] = []
+    skipped: list[str] = []
+    for csv_path in args.csv:
+        src = Path(csv_path)
+        try:
+            _header, rows, errors = validate(src, quiet=True, ignore_target_email=True)
+        except (OSError, ValueError, csv.Error) as e:
+            # 文件不存在/编码不符（如 GBK）/格式坏：只跳过该文件，其余照常验证，报告照常生成
+            print(f"[错误] {src} 读取失败，跳过该文件（{e.__class__.__name__}: {e}）")
+            skipped.append(src.name)
+            continue
+        if errors:
+            # 单个文件校验失败只跳过该文件，其余文件照常验证，报告照常生成
+            print(f"[错误] {src} 校验失败，跳过该文件：")
+            for e in errors:
+                print(f"  - {e}")
+            skipped.append(src.name)
+            continue
+        for idx, r in enumerate(rows, 1):
+            user = (r.get("UserName") or "").strip()
+            password = (r.get("Password") or "").strip()
+            target = (r.get("EmailAddress") or "").strip()
+            print(f"[{idx}/{len(rows)}] {src.name}:{user}: 验证中…", flush=True)
+            status, detail = "OK", ""
+            m = None
+            try:
+                m = imaplib.IMAP4_SSL(args.host, args.port, ssl_context=ctx, timeout=args.timeout)
+                m.login(user, password)
+                try:
+                    # LOGIN/NOOP 应答 OK 都不代表可用：腾讯对 IMAP 服务未开启的
+                    # 账号连 NOOP 都会应答，随后才断会话。以 SELECT INBOX（只读）
+                    # 为准——能否打开邮箱正是迁移搬运的必要条件
+                    _typ, _data = m.select("INBOX", readonly=True)
+                except (imaplib.IMAP4.error, OSError, ssl.SSLError) as e:
+                    status = "会话被拒"
+                    detail = f"LOGIN 已应答但邮箱不可访问（{e.__class__.__name__}: {e}），疑似 IMAP/SMTP 服务未开启或被限制"
+                    print(f"[警告] {user}: {detail}")
+                    print(f"[提示] {user}: 请到 邮箱设置→客户端设置 勾选'开启IMAP/SMTP服务'并保存，再重测")
+                else:
+                    if _typ != "OK":
+                        # 注意：现版本 imaplib 对 SELECT 的 NO/BAD 应答不抛异常而是
+                        # 返回非 OK typ（实测 3.13），必须显式判定，否则打不开的邮箱被误判可用
+                        status = "会话被拒"
+                        detail = f"LOGIN 已应答但 SELECT INBOX 被拒（{_typ}），邮箱不可打开，疑似 IMAP/SMTP 服务未开启或被限制"
+                        print(f"[警告] {user}: {detail}")
+                        print(f"[提示] {user}: 请到 邮箱设置→客户端设置 勾选'开启IMAP/SMTP服务'并保存，再重测")
+                    else:
+                        try:
+                            # 实测结论：服务未开启时腾讯会应答 LOGIN/NOOP/SELECT，
+                            # 但在 LOGOUT 收尾时直接掐线（EOF）；服务开启后 LOGOUT 正常。
+                            # 因此 LOGIN 后任何阶段断连都指向服务未开启，不作良性处理
+                            m.logout()
+                        except (imaplib.IMAP4.error, OSError, ssl.SSLError) as e:
+                            status = "会话被拒"
+                            detail = f"LOGIN 后会话中途断连（{e.__class__.__name__}: {e}），实测指向 IMAP/SMTP 服务未开启"
+                            print(f"[警告] {user}: {detail}")
+                            print(f"[提示] {user}: 请到 邮箱设置→客户端设置 勾选'开启IMAP/SMTP服务'并保存，再重测")
+            except (imaplib.IMAP4.error, OSError, ssl.SSLError, ValueError) as e:
+                # ValueError：账号/密码含非 ASCII 字符时 imaplib 内部按 ASCII 编码直接抛
+                # UnicodeEncodeError（不含原文，无泄露），捕获后按单账号失败继续
+                status = "失败"
+                # 密码不参与任何输出；错误详情只含异常类名与服务端返回文本
+                detail = f"{e.__class__.__name__}: {e}"
+                print(f"[警告] {user}: {detail}")
+                hint = _login_fail_hint(detail)
+                if hint:
+                    print(f"[提示] {user}: {hint}")
+            finally:
+                # 不用 with/__exit__ 收尾：imaplib 把连接层错误包装成 abort（非 OSError），
+                # __exit__ 对已死连接补发的 LOGOUT 会以 abort 逃逸并覆盖上方判定。
+                # 按状态显式清理：已 LOGOUT 则无事可做；连接已坏时 shutdown() 不发任何命令
+                if m is not None and m.state != "LOGOUT":
+                    try:
+                        m.shutdown()
+                    except Exception:
+                        pass
+            results.append({"SourceFile": src.name, "EmailAddress": target, "UserName": user, "Status": status, "Detail": detail})
+
+    failed = [r for r in results if r["Status"] != "OK"]
+    print(f"\n[OK] 验证完成：通过 {len(results) - len(failed)}/{len(results)} 个")
+    if failed:
+        print(f"[提示] 失败 {len(failed)} 个: {', '.join(r['UserName'] for r in failed)}")
+    if skipped:
+        print(f"[提示] 跳过 {len(skipped)} 个校验失败的文件（其中账号未验证）: {', '.join(skipped)}")
+    out_dir = Path(args.output) / _output_subdir()
+    out = out_dir / f"check_report_{_now_stamp()}.csv"
+    write_csv(out, ["SourceFile", "EmailAddress", "UserName", "Status", "Detail"], results)
+    print(f"[OK] 可用性报告: {out}")
+    if skipped:
+        return 1  # 有文件校验失败被跳过；已验证账号的结果仍写入上方报告
+    return 0 if not failed else 2
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -627,7 +864,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_probe.add_argument("--port", type=int, default=_imap_port_default(), help=f"源 IMAP 端口（默认 {_imap_port_default()} SSL）")
     p_probe.add_argument("--timeout", type=int, default=30, help="单账号连接超时秒数（默认 30）")
     p_probe.add_argument("--output", default=_output_default(), help="产物根目录")
+    p_probe.add_argument("--manifest", default=None, help="源清单 CSV（如 password.csv）；提供时汇总表补 EmailAddress（目标邮箱）列，密码不进任何产物")
     p_probe.set_defaults(func=cmd_probe)
+
+    p_check = sub.add_parser("check", help="只验证源 IMAP 登录可用性（登录即登出，不统计邮件），支持多个 CSV")
+    p_check.add_argument("csv", nargs="+", help="源 CSV 路径（可传多个，如 password-1.csv password-2.csv …）")
+    p_check.add_argument("--host", default=_imap_host_default(), help=f"源 IMAP 服务器（默认 {_imap_host_default()}，可环境变量覆盖）")
+    p_check.add_argument("--port", type=int, default=_imap_port_default(), help=f"源 IMAP 端口（默认 {_imap_port_default()} SSL）")
+    p_check.add_argument("--timeout", type=int, default=30, help="单账号连接超时秒数（默认 30）")
+    p_check.add_argument("--output", default=_output_default(), help="产物根目录")
+    p_check.set_defaults(func=cmd_check)
+
+    p_backfill = sub.add_parser("backfill", help="把汇总表统计列（total_count 等）回填到源清单 CSV（按 UserName=email 匹配）")
+    p_backfill.add_argument("summary", help="汇总表 CSV（email_check_success_*.csv）")
+    p_backfill.add_argument("csv", help="待回填的源清单 CSV（就地更新，建议先备份）")
+    p_backfill.set_defaults(func=cmd_backfill)
 
     p_state = sub.add_parser("state", help="读写交互式阶段状态（跨会话共享进度）")
     p_state.add_argument("--output", default=_output_default(), help="产物根目录（可环境变量 EMAIL_MIGRATION_OUTPUT 覆盖）")
@@ -642,6 +893,33 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+class _Tee:
+    """把终端输出同步落到日志文件，命令运行中即可 tail 观测实时状态。"""
+
+    def __init__(self, *streams):
+        self._streams = streams
+
+    def write(self, s):
+        for st in self._streams:
+            st.write(s)
+        return len(s)
+
+    def flush(self):
+        for st in self._streams:
+            st.flush()
+
+
+def _setup_tee_log(args: argparse.Namespace, cmd_name: str) -> None:
+    """所有命令输出落盘 output/<产物根>/logs/<命令>_<时间戳>.log。"""
+    logs_dir = Path(args.output) / _output_subdir() / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_path = logs_dir / f"{cmd_name}_{_now_stamp()}.log"
+    fh = open(log_path, "w", encoding="utf-8")
+    sys.stdout = _Tee(sys.stdout, fh)
+    sys.stderr = _Tee(sys.stderr, fh)
+    print(f"[OK] 日志: {log_path}")
+
+
 def main(argv: list[str] | None = None) -> int:
     # 终端输出统一 UTF-8，避免 Windows 非 UTF-8 控制台中文乱码（纯显示层，不影响文件写入/解析）。
     for stream in (sys.stdout, sys.stderr):
@@ -650,6 +928,8 @@ def main(argv: list[str] | None = None) -> int:
         except (AttributeError, ValueError, OSError):
             pass
     args = build_parser().parse_args(argv)
+    if hasattr(args, "output"):
+        _setup_tee_log(args, getattr(args, "command", args.func.__name__.removeprefix("cmd_")))
     return args.func(args)
 
 
