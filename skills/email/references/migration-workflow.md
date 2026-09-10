@@ -12,6 +12,7 @@
 ## 目录
 
 0. 脚本用途 | 谁执行
+0.5 EXO 命令执行模式与规范
 1. CSV 格式与准备
 2. 阶段 0：前置检查
 3. 阶段 1：分析与超限识别
@@ -32,10 +33,173 @@
 | `check` 源账号登录可用性验证（登录即登出，不统计邮件；适合改密后批量验凭据） | 源 IMAP + 源密码 | agent 独立 |
 | `backfill` 汇总表统计列回填源清单（按 UserName=email 匹配） | 本地文件 | agent 独立 |
 | `analyze` / `verify` | 人导出的 CSV | agent 独立（消费导出） |
-| 一切 EXO 命令 | M365 目标侧 | **必须人工**（已登录 PowerShell） |
+| 一切 EXO 命令 | M365 目标侧 | **agent（PTY 持久会话，见 0.5）或人工**（已登录 PowerShell），两者等价 |
 | `state` | 本地状态文件 | agent 独立 |
 
 **why**：`Connect-ExchangeOnline` 是交互式登录，登录态绑定在打开它的 PowerShell 会话内；pi 的命令行跑在独立的 bash 子进程（Git Bash/MSYS2/WSL），拿不到你的会话 token，也执行不了 M365 命令。凡不碰 EXO 登录态、数据来自「本地文件或源 IMAP 直连」→ agent 可独立跑；要到 M365 目标侧读写 → 一律人工在已登录 PowerShell 执行。
+
+## 0.5 EXO 命令执行模式与规范
+
+本技能支持两种 EXO 执行模式，按环境选择其一。本地 CSV 与源 IMAP 操作（`validate`/`generate`/`split`/`backfill`/`probe`/`check`/`analyze`/`verify`/`state`）不受此约束，始终由 agent 独立执行。
+
+### 模式 A：agent 代理执行（默认）
+
+单一持久 PowerShell 会话，规则如下：
+
+1. **会话建立**：以 PTY 模式启动 `powershell -NoExit -Command "Import-Module ExchangeOnlineManagement -Force"`，随后在会话内交互式执行 `Connect-ExchangeOnline`，由用户在浏览器完成一次授权。禁止将连接参数拼入启动命令串（`-ShowBanner:$false` 经 `-Command` 传入会因类型转换失败）。
+2. **会话独占**：全部 EXO 命令必须在同一会话内执行。普通 exec 新进程无登录态，命令必然失败。
+3. **连接验证**：`Get-ConnectionInformation` 返回 Connected 方可操作；以 `Get-Mailbox -ResultSize 3` 验证权限。
+4. **轮询等待**：批次状态轮询在会话内以 `Start-Sleep -Seconds N; Get-MigrationBatch` 完成。
+
+### 模式 B：人工执行（回退）
+
+PTY 不可用或用户要求人工确认时，agent 产出精排命令，用户在已登录 PowerShell 执行，结果经共享输出文件回流。
+
+### 批次生命周期规范
+
+| 操作 | 规则 |
+|------|------|
+| 停止 | `Stop-MigrationBatch` 后 Stopping 状态持续 1~3 分钟；未到 Stopped 禁止删除 |
+| 删除 | 逐批 `Remove-MigrationBatch -Identity <批名> -Confirm:$false`；管道方式对 Stopped 批静默失效，禁止使用 |
+| 清理 | Removing 状态持续约 3 分钟；`Get-MigrationBatch` 返回空之前禁止创建新批 |
+| 冲突 | 同一邮箱禁止同时存在于两个活跃批次（创建会被拒绝） |
+| 重复 | 删除重建不产生邮件重复；同批次内 Stop→Start / Sync Now 为增量同步，不重复迁移 |
+
+### 创建批次规范
+
+1. `-CSVData` 仅接受 CSV 文件字节：必须使用 `$csvData = [System.IO.File]::ReadAllBytes(<CSV路径>)`。禁止传入 `Import-Csv` 对象数组——类型转换失败，且报错信息会回显含密码的文件内容。
+2. 命令模板：
+
+```powershell
+$csvData = [System.IO.File]::ReadAllBytes("D:\path\migration_xxx.csv")
+$batchName = "Migrate_Full_" + (Get-Date -Format "yyyyMMdd_HHmmss")
+New-MigrationBatch -Name $batchName -SourceEndpoint "TencentIMAPEndpoint" -CSVData $csvData -AutoStart -AllowUnknownColumnsInCsv $true
+```
+
+3. 创建结果以复查为准（返回对象字段渲染不可靠）：`Get-MigrationBatch` 显示 `Status=Syncing`，且 `Get-MigrationUser -BatchId <批名> | Measure-Object` 计数等于 CSV 行数，方为就绪。
+
+### 目标邮箱统计导出规范
+
+1. `TotalItemSize` 以字符串导出（`"$($s.TotalItemSize)"`），本地正则 `\(([\d,]+) bytes\)` 提取字节数；`.Value.Bytes` 在 EXO 3.x 取不到值。
+2. 邮箱标识使用外层 `PrimarySmtpAddress`；排除系统邮箱（`-notlike "*Discovery*"`）。
+
+### 单封邮件大小限制
+
+1. 实际拦截点为目标邮箱 `MaxReceiveSize`（默认 36MB）。每次重建批次前，对所有目标邮箱放大：
+
+```powershell
+Get-Mailbox -ResultSize unlimited |
+    Where-Object { $_.PrimarySmtpAddress -like "*@<目标域名>.onmicrosoft.com" -and $_.PrimarySmtpAddress -notlike "*Discovery*" } |
+    Set-Mailbox -MaxReceiveSize 150MB -MaxSendSize 150MB
+```
+
+2. 该操作幂等，重复执行无害。执行后抽样验证应显示 `150 MB (157,286,400 bytes)`。
+3. 官方文档"单封 35MB 上限"说法已过时，勿引用为硬限制。超限邮件被跳过并记录于批次错误报告，收尾核对时按报告处理。
+4. 腾讯企业邮单封上限 50MB，存量邮件实测存在超过 150MB 者，迁移前放大目标限制为必做项。
+
+### 迁移进度查询标准命令（用户问"进度如何"时使用）
+
+进度 = 目标侧已落库 vs 源端 probe 基线，两条命令：
+
+```powershell
+# 1) 批次内单用户引擎统计：已同步条目 / 跳过条目 / 引擎预估总量 / 最后同步时间
+Get-MigrationUserStatistics -Identity <目标邮箱> |
+    Format-List Status, SyncedItemCount, SkippedItemCount, EstimatedTotalTransferSize, LastSyncedDateTime
+
+# 2) 目标邮箱实际落库（权威数字）：邮件数 + 占用
+$s = Get-MailboxStatistics -Identity <目标邮箱>
+"$($s.ItemCount) / $($s.TotalItemSize)"
+```
+
+- 进度百分比 = 目标 `ItemCount` ÷ 源端 probe 基线总数（按大小同理）。
+- `EstimatedTotalTransferSize` 是引擎"已发现项"的动态估计，会随枚举推进增长，**不是**源端总量；总量基准只用 probe 基线。
+- `SkippedItemCount > 0` 时导出批次错误报告核对（大邮件超限等）。
+- EAC/批次显示的"数据一致性分数"（如 Perfect）是**引擎内部自洽性指标**（已同步部分与 IMAP 所见一致），**不是完整度证明**——IMAP 视图被截断时它照样显示 Perfect。完整度唯一判据：目标侧落库 vs 源端 probe 基线（webmail 交叉验证过的）。
+- 引擎 `SyncedItemCount` 与目标 `ItemCount` 允许小幅偏差（时间差），大幅偏差（>5%）按核对口径排查。
+
+### 迁移数据汇总报告规范（Excel，全流程单一份）
+
+**定位**：进行中即为工作进度汇报，完成后同一结构即验收结果；不另设"验收报告"。脚本：`scripts/gen_migration_report.py`（参数 `--user-stats / --target-stats / --baseline / --out / --batch / --note`）。
+
+数据采集（EXO 会话内两条标准导出，见"目标端统计标准方法"与进度查询命令）：
+
+```powershell
+# 1) 逐用户引擎统计 -> user_stats.csv
+Get-MigrationUser -BatchId <批名> | ForEach-Object {
+    $st = Get-MigrationUserStatistics -Identity $_.Identity
+    [PSCustomObject]@{ EmailAddress = $_.Identity; Status = $_.Status
+        SyncedItemCount = $st.SyncedItemCount; SkippedItemCount = $st.SkippedItemCount
+        EstimatedTotalTransferSize = "$($st.EstimatedTotalTransferSize)"
+        LastSyncedDateTime = $st.LastSyncedDateTime } } |
+    Export-Csv <产物目录>\user_stats.csv -NoTypeInformation -Encoding UTF8
+
+# 2) 目标邮箱实际落库 -> target_stats.csv
+```
+
+Sheet 结构（两个固定 + 两个完成追加）：
+
+**Sheet1 迁移概要**（管理视角，只写管理层关心的数字）：账号总数、已完成、同步中、失败/停止、原邮箱邮件总数、原邮箱空间合计、目标邮箱邮件总数、目标邮箱空间合计、完成度（按邮件总数计）、完成度（按空间占用计）、跳过邮件合计、最近同步时间、更新时间。不放批次名等纯技术标识于正文之外。
+
+**Sheet2 迁移数据汇总**（每账号一行）：用户名、迁移状态（中文：已完成/同步中/失败）、**原邮箱邮件总数、原邮箱空间占用**、目标邮箱邮件总数、目标邮箱空间占用、完成度（按邮件总数计）、完成度（按空间占用计）、本批次已同步、跳过邮件数、最近同步时间。无源列即无法对账，禁止省略原邮箱两列；完成度必须双维度分别计算。
+
+**完成后追加**：
+- Sheet3 文件夹对账：邮箱、文件夹名（UTF-7 解码）、匹配类型（直接/系统映射）、源邮件数、目标邮件数、差值、状态；匹配失败标"目标缺失/源缺失"，禁止静默丢行。
+- Sheet4 跳过明细：数据源为管理员邮箱错误报告邮件附件 CSV（PowerShell 无逐项接口）；字段：邮箱、用户名、主题、接收时间、所在文件夹、失败原因；无跳过保留表头+"无跳过项"。
+
+规范：
+1. `SkippedItemCount > 0` 的账号在概要备注点名，指向 Sheet4。
+2. 基线校准状态必须在备注写明（哪些账号为新基线、哪些为收取范围变更前旧基线待重校）。
+3. 引擎预估传输量不进报告（对管理无意义）；总量与进度一律以源基线为准。
+4. 输入 CSV 由标准导出命令产生；密码与凭据字段禁止进入任何输入输出。
+5. 状态用中文业务词，禁用引擎术语（Synced/Syncing 等）直接呈现。
+6. **最近同步时间**：数据源为 `Get-MigrationBatch` / `Get-MigrationUserStatistics` 的 `LastSyncedDateTime`；该字段在批次 Syncing 期间为空，仅 Synced 后有值——同步中的账号/批次显示"同步进行中（完成后显示）"，禁止留空。EAC 界面同步中也会显示上次同步时间，但 PowerShell 面取不到，勿混用。
+7. **列宽规范**：所有列宽 ≥ max(表头显示宽度, 内容显示宽度) + 4（CJK 按 2 倍计）；生成脚本内置 `set_widths` 自动计算，禁止手工写死小于表头的列宽。
+8. EXO 返回的时间为 UTC（如 `StartDateTime`），展示前必须转本地时区。
+
+### 源端统计标准方法（基线）
+
+1. 统计一律用 `probe` 脚本产出（逐文件夹 `SELECT readonly` + EXISTS 计数、SIZE 累加），结果落盘 CSV，禁止手写临时脚本另搞一套口径。
+2. **收取范围变更后必须重跑 probe 并与 webmail 对照验证生效**，两轮数字一致才算基线；"设置已保存"不等于"已生效"（实测存在生效延迟，期间 IMAP 只见部分邮件且无任何报错）。
+3. 基线三要素：邮件总数（probe 汇总）、文件夹数（probe 文件夹列表）、占用空间（probe SIZE 合计，与 webmail"已使用容量"交叉核对）。
+
+### 目标端统计标准方法
+
+1. 邮箱级（邮件总数 + 占用）：
+
+```powershell
+Get-Mailbox -ResultSize unlimited |
+    Where-Object { $_.PrimarySmtpAddress -like "*@<目标域名>.onmicrosoft.com" -and $_.PrimarySmtpAddress -notlike "*Discovery*" } |
+    ForEach-Object {
+        $addr = $_.PrimarySmtpAddress
+        $s = Get-MailboxStatistics -Identity $_.Identity
+        [PSCustomObject]@{ EmailAddress = $addr; ItemCount = $s.ItemCount; TotalItemSize = "$($s.TotalItemSize)" }
+    } |
+    Export-Csv -Path "<产物目录>\target_stats.csv" -NoTypeInformation -Encoding UTF8
+```
+
+2. 文件夹级（逐文件夹邮件数，与源端 probe 逐文件夹对账）：
+
+```powershell
+Get-MailboxFolderStatistics -Identity <目标邮箱> |
+    Select-Object @{N="EmailAddress";E={<目标邮箱>}}, FolderPath, ItemsInFolder |
+    Export-Csv -Path "<产物目录>\folder_stats.csv" -NoTypeInformation -Encoding UTF8
+```
+
+3. 本地解析 `TotalItemSize` 字符串提取字节数后，与源端基线做"总数 + 文件夹级"双层对比。
+
+### 源/目标核对口径
+
+1. probe 邮件数合计与目标 `ItemCount` 差值 ±2% 内视为一致（探测与同步存在时间差）。
+2. 源端 IMAP 逐文件夹计数必须用 `SELECT(<文件夹>, readonly=True)` 后读 EXISTS；腾讯对含空格/特殊字符的文件夹名（如 `Sent Messages`）执行 STATUS 会报 BAD，且 imaplib 不自动加引号——文件夹名必须手动包双引号 `"'%s'" % name` 后再 SELECT。漏掉这类文件夹会造成数千封级别的统计缺口。
+3. 核对时源端大小基线以 webmail 后台"已使用容量"为准（IMAP 无可靠的总量 SIZE 接口）。
+2. 腾讯"收取范围"非"全部"时，IMAP 仅暴露近期邮件：后台显示容量远大于 IMAP 求和，且旧邮件静默不迁。迁移前必须确认为"全部"。
+3. **probe 基线必须与 webmail 抽样交叉验证**（至少抽 1 个账号）：IMAP 求和 < webmail 实际数的 50% 即收取范围受限，禁止以该基线建批或核对。
+4. 收取范围受限时已建批次的补救：改为"全部"后，批次每 24 小时自动增量同步会补齐新可见邮件；确认全部补齐后再 Complete。改设置后先重新 probe 校准基线。
+
+### agent 侧脚本执行规范
+
+1. 禁止在 PowerShell 内联多行 Python（引号转义不可靠）；必须先写 .py 文件再执行。
+2. PTY 会话内 EXO 报错可能回显敏感字段；含密码文件的操作须保证参数合法，避免进入报错分支。
 
 ## 1. CSV 格式与准备
 
@@ -338,7 +502,7 @@ Get-MigrationBatch | Where-Object {
 
 ## 7. 注意事项与硬限制
 
-- 官方 IMAP 迁移硬限制：单邮箱最多迁移 500,000 项，按"最新到最旧"迁移，超出部分静默丢弃；单封邮件最大 35MB
+- 官方 IMAP 迁移硬限制：单邮箱最多迁移 500,000 项，按"最新到最旧"迁移，超出部分静默丢弃；单封大小实际受目标邮箱 MaxReceiveSize 约束（默认 36MB，迁移前放大到 150MB，见 0.5 节"单封邮件大小限制"）；迁移后核对批次错误报告确认有无超限被跳过的邮件
 - 只迁移收件箱及其他邮件文件夹；联系人、日历、任务不迁移，需另行方案
 - MRM/存档策略：M365 默认 MRM 策略会把邮件自动移走/删除，迁移期间建议移除目标邮箱保留策略
 - 超限判断不能只看大小：同时筛大小超 45GB 与数量超 50 万条

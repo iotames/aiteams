@@ -1,10 +1,8 @@
-> ⚠️ **声明**：本文档为早期手记草稿，仅供参考。正式工作流以 `references/migration-workflow.md` 与 `SKILL.md` 为准。文中命令可能与新版能力冲突，勿直接照抄。
+> **定位**：本文档为面向执行者的 EXO 迁移命令手册，与 `references/migration-workflow.md` 配套使用；整体流程与分工以 `SKILL.md` 为准。
 
 ## 背景
 
-公司要从腾讯企业邮迁移到微软邮箱。腾讯企业邮单邮箱空间没限制，微软邮箱标准版，单邮箱空间限制50G。
-
-你帮我规划一下迁移方。包括腾讯企业邮和微软邮箱要做什么配置，迁移的时候，依赖的命令行的安装和使用。
+将公司邮箱从腾讯企业邮迁移至 Microsoft 365 Exchange Online（标准版）。源端单邮箱无容量限制，目标端单邮箱上限 50GB。本文档覆盖源端与目标端配置、迁移依赖的命令行工具安装与使用。
 
 ## 微软官方迁移方案
 
@@ -39,6 +37,7 @@ Get-Mailbox -ResultSize 3
 ### 邮箱账号准备
 
 1. 待迁移的邮箱：设置 - 客户端设置 - 收取选项： 如果是默认 收取 `最近30天` ，则改为： 收取 `全部` 的邮件。同时，推荐勾选 `收取“我的文件夹“`。
+   > 改动后必须验证：以任一账号的 webmail 邮件数（收件箱 + 我的文件夹）与 IMAP 摸底结果对照，一致方可继续。此设置逐账号生效，管理员需确认全部待迁移账号均已改为"全部"。
 2. ExchangeOnline支持的CSV迁移文件：标题行字段为 `EmailAddress,UserName,Password`，代表 `迁移目标邮箱地址,源邮箱登录名,源邮箱密码`。示例：`target@xxx.onmicrosoft.com,yourname@tencent.com,xxxxxx`。
 
 ### 迁移命令
@@ -66,13 +65,28 @@ Set-Mailbox -Identity <目标邮箱> -RetentionPolicy $null
 
 #### 分析与筛选
 
+**命令 3b：放大目标邮箱单封邮件大小限制**（每次重建批次前必须执行，幂等）
+
+```powershell
+# 默认 MaxReceiveSize 36MB 会拦截大邮件；腾讯存量邮件实测存在超过 150MB 者
+Get-Mailbox -ResultSize unlimited |
+    Where-Object { $_.PrimarySmtpAddress -like "*@<目标域名>.onmicrosoft.com" -and $_.PrimarySmtpAddress -notlike "*Discovery*" } |
+    Set-Mailbox -MaxReceiveSize 150MB -MaxSendSize 150MB
+
+# 抽样验证，应显示 150 MB (157,286,400 bytes)
+Get-Mailbox -ResultSize 5 | Select-Object PrimarySmtpAddress, MaxReceiveSize
+```
+
 **命令 4：读取 CSV 文件内容**（修改 CSV 内容后需重新执行）
+
 
 ```powershell
 # 读取csv文件内容。注意：修改csv内容后，要重新执行读取命令。
 # 建议先用少量用户测试，确认没问题后再放全部500人
 $csvData = [System.IO.File]::ReadAllBytes("C:\path\to\your\migration.csv")
 ```
+
+> 禁止以 `Import-Csv` 对象数组传入 `-CSVData`：EXO 3.x 类型转换失败，且报错信息会回显含密码的文件内容。
 
 **命令 5：创建用于分析的批处理**
 
