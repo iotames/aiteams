@@ -16,7 +16,7 @@ Sheet：1.迁移概要  2.迁移数据汇总
 import argparse
 import csv
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -55,16 +55,20 @@ def fmt_mb(nbytes):
 
 
 def fmt_dt(value):
-    """EXO 时间为 UTC，转本地；空值原样返回。"""
+    """EXO 导出时间为 UTC（形如 2026/9/11 3:08:02），统一转本地时区；空值原样返回。"""
     if not value:
         return ''
+    s = str(value).strip()
     try:
-        dt = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
-        if dt.tzinfo:
-            dt = dt.astimezone()
-        return dt.strftime('%Y/%m/%d %H:%M')
+        dt = datetime.fromisoformat(s.replace('Z', '+00:00'))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
     except Exception:
-        return str(value)
+        try:
+            dt = datetime.strptime(s, '%Y/%m/%d %H:%M:%S').replace(tzinfo=timezone.utc)
+        except Exception:
+            return s
+    return dt.astimezone().strftime('%Y/%m/%d %H:%M')
 
 
 def set_widths(ws, rows, headers):
@@ -105,7 +109,7 @@ def main():
             'status': STATUS_CN.get(r['Status'], r['Status']),
             'synced': int(r['SyncedItemCount'] or 0),
             'skipped': int(r['SkippedItemCount'] or 0),
-            'last': fmt_dt(r.get('LastSyncedDateTime', '')),
+            'last': fmt_dt(r.get('LastSuccessfulSyncTime', '')),
         })
     users.sort(key=lambda x: (SORT_ORDER.get(x['status'], 9), x['user']))
 
@@ -123,18 +127,25 @@ def main():
         b = baseline.get(u['user'], {'count': 0, 'mb': 0.0})
         t = targets.get(u['email'], {'count': 0, 'bytes': 0})
         pct_count = ('%.1f%%' % (t['count'] / b['count'] * 100)) if b['count'] else '—'
-        pct_size = ('%.1f%%' % (t['bytes'] / (b['mb'] * 1048576) * 100)) if b['mb'] else '—'
+        pct_num = (t['count'] / b['count'] * 100) if b['count'] else None
+        if pct_num is not None and pct_num > 100:
+            note = '同步期间有新增邮件，故完成度超过100%'
+        elif u['skipped'] > 0:
+            note = '存在跳过邮件，待错误报告核对'
+        else:
+            note = ''
+        status_disp = '已完成，增量同步中' if u['status'] == '已完成' else u['status']
         rows.append([
-            u['user'], u['status'],
-            b['count'], fmt_mb(b['mb'] * 1048576),
-            t['count'], fmt_mb(t['bytes']),
-            pct_count, pct_size,
-            u['synced'], u['skipped'],
+            u['user'],
+            fmt_mb(b['mb'] * 1048576), fmt_mb(t['bytes']),
+            b['count'], t['count'], pct_count,
             u['last'] or ('首轮同步进行中' if u['status'] == '同步中' else '—'),
+            u['synced'], u['skipped'],
+            status_disp, note,
         ])
 
-    total_src_count = sum(r[2] for r in rows)
-    total_src_bytes = sum(int(b['mb'] * 1048576) for b in baseline.values() if b)
+    total_src_count = sum(b['count'] for b in baseline.values())
+    total_src_bytes = sum(int(b['mb'] * 1048576) for b in baseline.values())
     total_tgt_count = sum(t['count'] for t in targets.values())
     total_tgt_bytes = sum(t['bytes'] for t in targets.values())
     done = [u for u in users if u['status'] == '已完成']
@@ -142,8 +153,8 @@ def main():
     failed = [u for u in users if u['status'] in ('失败', '已停止')]
     total_skip = sum(u['skipped'] for u in users)
 
-    last_sync_disp = args.last_sync or (
-        '；'.join(u['last'] for u in users if u['last']) or '同步进行中（完成后显示）')
+    last_syncs = sorted(u['last'] for u in users if u['last'])
+    last_sync_disp = args.last_sync or (last_syncs[-1] if last_syncs else '同步进行中（完成后显示）')
 
     wb = Workbook(); wb.remove(wb.active)
 
@@ -164,7 +175,6 @@ def main():
         ('目标邮箱邮件总数', '%d 封' % total_tgt_count),
         ('目标邮箱空间合计', fmt_mb(total_tgt_bytes)),
         ('完成度（按邮件总数计）', '%.1f%%' % (total_tgt_count / total_src_count * 100) if total_src_count else '—'),
-        ('完成度（按空间占用计）', '%.1f%%' % (total_tgt_bytes / total_src_bytes * 100) if total_src_bytes else '—'),
         ('跳过邮件合计', '%d 封' % total_skip),
         ('最近同步时间', last_sync_disp),
         ('更新时间', datetime.now().strftime('%Y/%m/%d %H:%M')),
@@ -191,10 +201,9 @@ def main():
 
     # ---------- Sheet2 迁移数据汇总 ----------
     ws2 = wb.create_sheet('迁移数据汇总')
-    headers = ['用户名', '迁移状态', '原邮箱邮件总数', '原邮箱空间占用',
-               '目标邮箱邮件总数', '目标邮箱空间占用',
-               '完成度（按邮件总数计）', '完成度（按空间占用计）',
-               '本批次已同步', '跳过邮件数', '最近同步时间']
+    headers = ['用户名', '原邮箱空间占用', '目标邮箱空间占用',
+               '原邮箱邮件总数', '目标邮箱邮件总数', '完成度（按邮件总数计）',
+               '最近同步时间', '本批次已同步', '跳过邮件数', '迁移状态', '说明']
     for j, h in enumerate(headers, 1):
         cell = ws2.cell(1, j, h)
         cell.fill, cell.font, cell.border = HDR_FILL, HDR_FONT, BORDER
@@ -203,13 +212,21 @@ def main():
         for j, v in enumerate(row, 1):
             cell = ws2.cell(i, j, v)
             cell.border = BORDER
-            if 3 <= j <= 10:
+            if j in (2, 3, 4, 5, 6, 8, 9):
                 cell.alignment = Alignment(horizontal='right')
-        ws2.cell(i, 2).fill = STATUS_FILL.get(row[1], YELLOW)
+        pct_val = float(str(row[5]).replace('%', '')) if row[5] not in ('—', '') else None
+        if pct_val is not None and pct_val < 100:
+            ws2.cell(i, 6).fill = RED
+        if row[8] and row[8] > 0:
+            ws2.cell(i, 9).fill = RED
+        ws2.cell(i, 10).fill = GREEN if row[9].startswith('已完成') else (
+            YELLOW if row[9] == '同步中' else RED)
     set_widths(ws2, rows, headers)
     ws2.freeze_panes = 'A2'
     ws2.auto_filter.ref = ws2.dimensions
 
+    wb.move_sheet('迁移数据汇总', offset=-1)
+    wb.active = wb.index(wb['迁移数据汇总'])
     wb.save(args.out)
     print('saved:', args.out)
 

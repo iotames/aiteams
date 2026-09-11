@@ -7,7 +7,7 @@ description: >-
   微软/Exchange Online"、"生成或校验迁移 CSV"、"分析超限邮箱"、"分批迁移邮箱"、"核对迁移结果"
   时使用，也适用于其他 IMAP 源 → Exchange Online 的迁移场景。
 metadata:
-  version: "2.3.5"
+  version: "2.4.0"
 ---
 
 # email — 大型企业邮箱迁移

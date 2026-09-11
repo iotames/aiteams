@@ -104,7 +104,7 @@ Get-Mailbox -ResultSize unlimited |
 ```powershell
 # 1) 批次内单用户引擎统计：已同步条目 / 跳过条目 / 引擎预估总量 / 最后同步时间
 Get-MigrationUserStatistics -Identity <目标邮箱> |
-    Format-List Status, SyncedItemCount, SkippedItemCount, EstimatedTotalTransferSize, LastSyncedDateTime
+    Format-List Status, SyncedItemCount, SkippedItemCount, EstimatedTotalTransferSize, LastSuccessfulSyncTime
 
 # 2) 目标邮箱实际落库（权威数字）：邮件数 + 占用
 $s = Get-MailboxStatistics -Identity <目标邮箱>
@@ -130,7 +130,7 @@ Get-MigrationUser -BatchId <批名> | ForEach-Object {
     [PSCustomObject]@{ EmailAddress = $_.Identity; Status = $_.Status
         SyncedItemCount = $st.SyncedItemCount; SkippedItemCount = $st.SkippedItemCount
         EstimatedTotalTransferSize = "$($st.EstimatedTotalTransferSize)"
-        LastSyncedDateTime = $st.LastSyncedDateTime } } |
+        LastSuccessfulSyncTime = $st.LastSuccessfulSyncTime } } |
     Export-Csv <产物目录>\user_stats.csv -NoTypeInformation -Encoding UTF8
 
 # 2) 目标邮箱实际落库 -> target_stats.csv
@@ -138,9 +138,16 @@ Get-MigrationUser -BatchId <批名> | ForEach-Object {
 
 Sheet 结构（两个固定 + 两个完成追加）：
 
-**Sheet1 迁移概要**（管理视角，只写管理层关心的数字）：账号总数、已完成、同步中、失败/停止、原邮箱邮件总数、原邮箱空间合计、目标邮箱邮件总数、目标邮箱空间合计、完成度（按邮件总数计）、完成度（按空间占用计）、跳过邮件合计、最近同步时间、更新时间。不放批次名等纯技术标识于正文之外。
+**Sheet2 迁移概要**（管理视角，只写管理层关心的数字）：账号总数、已完成、同步中、失败/停止、原邮箱邮件总数、原邮箱空间合计、目标邮箱邮件总数、目标邮箱空间合计、完成度（按邮件总数计）、完成度（按空间占用计）、跳过邮件合计、最近同步时间、更新时间。不放批次名等纯技术标识于正文之外。
 
-**Sheet2 迁移数据汇总**（每账号一行）：用户名、迁移状态（中文：已完成/同步中/失败）、**原邮箱邮件总数、原邮箱空间占用**、目标邮箱邮件总数、目标邮箱空间占用、完成度（按邮件总数计）、完成度（按空间占用计）、本批次已同步、跳过邮件数、最近同步时间。无源列即无法对账，禁止省略原邮箱两列；完成度必须双维度分别计算。
+**Sheet2 迁移数据汇总**（默认打开即显示的首页，每账号一行），列序固定：
+用户名 → 原邮箱空间占用 → 目标邮箱空间占用 → 原邮箱邮件总数 → 目标邮箱邮件总数 → 完成度（按邮件总数计）→ 最近同步时间 → 本批次已同步 → 跳过邮件数 → 迁移状态 → 说明（最右列）。无源列即无法对账，禁止省略原邮箱两列；不设按空间计的完成度列。
+- 状态文案：已完成账号显示"已完成，增量同步中"（Synced 批次在 Complete 收尾前持续每 24h 增量，如实呈现）；同步中显示"同步中"。
+- 着色：完成度 <100% 的单元格标红色；跳过邮件数 >0 的单元格标红色。
+- **说明列**（自动生成）：完成度 >100% → "同步期间有新增邮件，故完成度超过100%"；跳过 >0 → "存在跳过邮件，待错误报告核对"；两者同时命中优先显示前者。
+- 打开时默认激活本 sheet。
+
+**生成前置（必做）**：生成报告前必须先询问用户"是否重新摸底源邮箱（邮件总数/空间占用），更新基线文件"——尤其验收环节；用户确认后先跑 probe 更新基线再生成报告，未确认可用现有基线出进度版。
 
 **完成后追加**：
 - Sheet3 文件夹对账：邮箱、文件夹名（UTF-7 解码）、匹配类型（直接/系统映射）、源邮件数、目标邮件数、差值、状态；匹配失败标"目标缺失/源缺失"，禁止静默丢行。
@@ -150,11 +157,12 @@ Sheet 结构（两个固定 + 两个完成追加）：
 1. `SkippedItemCount > 0` 的账号在概要备注点名，指向 Sheet4。
 2. 基线校准状态必须在备注写明（哪些账号为新基线、哪些为收取范围变更前旧基线待重校）。
 3. 引擎预估传输量不进报告（对管理无意义）；总量与进度一律以源基线为准。
-4. 输入 CSV 由标准导出命令产生；密码与凭据字段禁止进入任何输入输出。
-5. 状态用中文业务词，禁用引擎术语（Synced/Syncing 等）直接呈现。
-6. **最近同步时间**：数据源为 `Get-MigrationBatch` / `Get-MigrationUserStatistics` 的 `LastSyncedDateTime`；该字段在批次 Syncing 期间为空，仅 Synced 后有值——同步中的账号/批次显示"同步进行中（完成后显示）"，禁止留空。EAC 界面同步中也会显示上次同步时间，但 PowerShell 面取不到，勿混用。
-7. **列宽规范**：所有列宽 ≥ max(表头显示宽度, 内容显示宽度) + 4（CJK 按 2 倍计）；生成脚本内置 `set_widths` 自动计算，禁止手工写死小于表头的列宽。
-8. EXO 返回的时间为 UTC（如 `StartDateTime`），展示前必须转本地时区。
+4. **输入 CSV 必须当次实时导出**（每次生成报告前都重新执行两条标准导出命令），禁止复用历史导出文件——过期数据会让"最近同步时间/完成度"全部失真且无从察觉。概要中的"更新时间"即数据时效，与报告生成时间一致。
+5. 密码与凭据字段禁止进入任何输入输出。
+6. 状态用中文业务词，禁用引擎术语（Synced/Syncing 等）直接呈现。
+7. **最近同步时间**：数据源为 `Get-MigrationUserStatistics` 的 **`LastSuccessfulSyncTime`**（勿用 `LastSyncedDateTime`——该字段长期为空，实测不可用）。注意两点：① 该值为 UTC，展示前必须转本地时区（EXO 导出的 DateTime 字符串无时区标记，按 UTC 处理）；② 个别账号可能仍为空，显示"首轮同步进行中"，禁止留空。
+8. **列宽规范**：所有列宽 ≥ max(表头显示宽度, 内容显示宽度) + 4（CJK 按 2 倍计）；生成脚本内置 `set_widths` 自动计算，禁止手工写死小于表头的列宽。
+9. EXO 返回的时间为 UTC（如 `StartDateTime`），展示前必须转本地时区。
 
 ### 源端统计标准方法（基线）
 
