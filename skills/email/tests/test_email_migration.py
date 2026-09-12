@@ -280,11 +280,18 @@ def test_13_probe_auth_failure_reported(tmp_path: Path, monkeypatch) -> None:
     assert all("失败" in r["Status"] for r in rows)
 
 
-def test_14_mask_email() -> None:
-    """终端脱敏：本地部分只保留首尾字符。"""
-    assert email_migration._mask_email("abc@example.com") == "a***c@example.com"
-    assert email_migration._mask_email("ab@example.com") == "a***@example.com"
-    assert email_migration._mask_email("nouser") == "***"
+def test_14_probe_artifacts_contain_no_password(tmp_path: Path, monkeypatch) -> None:
+    """真实保证：probe 产物（汇总表/明细/日志）中不出现源密码。"""
+    _FakeIMAP.instances = []
+    monkeypatch.setattr(email_migration.imaplib, "IMAP4_SSL", _FakeIMAP)
+    src = _probe_source_csv(tmp_path)
+    out = tmp_path / "out"
+    assert email_migration.main(["probe", str(src), "--output", str(out)]) == 0
+    files = sorted(p for p in out.rglob("*") if p.is_file() and p.suffix in {".csv", ".log"})
+    assert files, "probe 应产出 CSV 与日志"
+    for p in files:
+        text = p.read_text(encoding="utf-8", errors="replace")
+        assert "fake-src-pw" not in text, f"密码泄漏到产物: {p.name}"
 
 
 # ── 阶段状态机（跨会话共享进度） ──────────────────────────────────

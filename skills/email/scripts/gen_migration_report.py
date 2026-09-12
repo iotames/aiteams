@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """生成邮箱迁移数据汇总报告（全流程单一份：进行中=进度汇报，完成后=验收结果）。
 
 用法：
@@ -9,8 +9,7 @@
       --out <输出 xlsx> [--batch <批次名>] [--note <说明>]
       [--last-sync <最近同步时间，Syncing 期间 PowerShell 取不到时省略>]
 
-Sheet：1.迁移概要  2.迁移数据汇总
-完成后追加：3.文件夹对账  4.跳过明细
+Sheet：1.迁移概要  2.迁移数据汇总（文件夹对账与跳过明细属诊断产物，不进报告）
 密码等凭据禁止进入任何输入输出。
 """
 import argparse
@@ -90,6 +89,7 @@ def main():
     ap.add_argument('--batch', default='')
     ap.add_argument('--note', default='')
     ap.add_argument('--last-sync', default='')
+    ap.add_argument('--extra-row', action='append', default=[], metavar='K=V', help='额外概要行（可重复），如 基线数据时间=2026/09/12 11:20')
     args = ap.parse_args()
 
     baseline = {}
@@ -130,6 +130,8 @@ def main():
         pct_num = (t['count'] / b['count'] * 100) if b['count'] else None
         if pct_num is not None and pct_num > 100:
             note = '同步期间有新增邮件，故完成度超过100%'
+        elif pct_num is not None and pct_num < 99:
+            note = '目标少于源 %d 封，需核对是否有未迁移邮件' % (b['count'] - t['count'])
         elif u['skipped'] > 0:
             note = '存在跳过邮件，待错误报告核对'
         else:
@@ -173,12 +175,17 @@ def main():
         ('原邮箱邮件总数', '%d 封' % total_src_count),
         ('原邮箱空间合计', fmt_mb(total_src_bytes)),
         ('目标邮箱邮件总数', '%d 封' % total_tgt_count),
+        ('目标侧口径', '仅邮件类文件夹的可见邮件数（不含日历/联系人/任务/系统隐藏项）'),
         ('目标邮箱空间合计', fmt_mb(total_tgt_bytes)),
         ('完成度（按邮件总数计）', '%.1f%%' % (total_tgt_count / total_src_count * 100) if total_src_count else '—'),
         ('跳过邮件合计', '%d 封' % total_skip),
         ('最近同步时间', last_sync_disp),
         ('更新时间', datetime.now().strftime('%Y/%m/%d %H:%M')),
     ]
+    for item in args.extra_row:
+        k, _, v = item.partition("=")
+        if k:
+            summary.append((k, v))
     if args.batch:
         summary.insert(0, ('迁移批次', args.batch))
     for k, v in summary:
@@ -189,8 +196,8 @@ def main():
         r += 1
 
     r += 1
-    note = args.note or ('跳过邮件明细见管理员邮箱错误报告附件；'
-                         '部分账号原邮箱基线为收取范围变更前数据，验收前将逐账号重新校准。')
+    note = args.note or ('跳过邮件逐条明细属诊断文件（管理员邮箱错误报告附件），不入本报告；'
+                         '基线取自最近一次 probe 摸底结果，其时间见「基线数据时间」。')
     ws.cell(r, 1, '备注').font = Font(bold=True)
     ws.cell(r, 2, note)
     ws.merge_cells(start_row=r, start_column=2, end_row=r + 2, end_column=3)

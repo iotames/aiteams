@@ -32,11 +32,12 @@
 | `probe` 源邮箱摸底（邮件数/占用字节） | 源 IMAP + 源密码 | agent 独立 |
 | `check` 源账号登录可用性验证（登录即登出，不统计邮件；适合改密后批量验凭据） | 源 IMAP + 源密码 | agent 独立 |
 | `backfill` 汇总表统计列回填源清单（按 UserName=email 匹配） | 本地文件 | agent 独立 |
+| `rebuild_baseline_from_probe_log` 从 probe 日志重建基线 CSV（产物缺失兜底） | 本地文件 | agent 独立 |
 | `analyze` / `verify` | 人导出的 CSV | agent 独立（消费导出） |
 | 一切 EXO 命令 | M365 目标侧 | **agent（PTY 持久会话，见 0.5）或人工**（已登录 PowerShell），两者等价 |
 | `state` | 本地状态文件 | agent 独立 |
 
-**why**：`Connect-ExchangeOnline` 是交互式登录，登录态绑定在打开它的 PowerShell 会话内；pi 的命令行跑在独立的 bash 子进程（Git Bash/MSYS2/WSL），拿不到你的会话 token，也执行不了 M365 命令。凡不碰 EXO 登录态、数据来自「本地文件或源 IMAP 直连」→ agent 可独立跑；要到 M365 目标侧读写 → 一律人工在已登录 PowerShell 执行。
+**why**：`Connect-ExchangeOnline` 是交互式登录，登录态绑定在打开它的 PowerShell 会话内。凡不碰 EXO 登录态、数据来自「本地文件或源 IMAP 直连」→ agent 可独立跑；要到 M365 目标侧读写 → 走 0.5 节模式 A（agent 持久 PTY 会话，用户授权一次）或模式 B（人工已登录会话），两者等价。
 
 ## 0.5 EXO 命令执行模式与规范
 
@@ -50,6 +51,7 @@
 2. **会话独占**：全部 EXO 命令必须在同一会话内执行。普通 exec 新进程无登录态，命令必然失败。
 3. **连接验证**：`Get-ConnectionInformation` 返回 Connected 方可操作；以 `Get-Mailbox -ResultSize 3` 验证权限。
 4. **轮询等待**：批次状态轮询在会话内以 `Start-Sleep -Seconds N; Get-MigrationBatch` 完成。
+5. **会话生命周期归用户（硬性）**：用户未明确要求断开时，禁止 `Disconnect-ExchangeOnline`、`exit`、终止会话进程或关闭窗口——重建会话需要用户重新完成一次浏览器授权，且可能受组织策略/节流影响。仅当用户明确指示，或会话已确认失效（命令无响应且需要恢复）时才允许断开/重建，并说明原因。
 
 ### 模式 B：人工执行（回退）
 
@@ -80,6 +82,16 @@ New-MigrationBatch -Name $batchName -SourceEndpoint "TencentIMAPEndpoint" -CSVDa
 
 ### 目标邮箱统计导出规范
 
+**统一用固化脚本，禁止手敲管道拼口径**（口径与踩坑见 `report-spec.md`「目标侧统计口径」）：
+
+```powershell
+. <技能目录>\scripts\exo_tasks.ps1
+Assert-ExoSession
+Export-UserStats   -BatchId <批名>   # -> user_stats.csv
+Export-TargetStats -BatchId <批名>   # -> target_stats.csv
+Export-FolderStats -BatchId <批名>   # -> folder_stats.csv（核对用，不进报告）
+```
+
 1. `TotalItemSize` 以字符串导出（`"$($s.TotalItemSize)"`），本地正则 `\(([\d,]+) bytes\)` 提取字节数；`.Value.Bytes` 在 EXO 3.x 取不到值。
 2. 邮箱标识使用外层 `PrimarySmtpAddress`；排除系统邮箱（`-notlike "*Discovery*"`）。
 
@@ -106,98 +118,45 @@ Get-Mailbox -ResultSize unlimited |
 Get-MigrationUserStatistics -Identity <目标邮箱> |
     Format-List Status, SyncedItemCount, SkippedItemCount, EstimatedTotalTransferSize, LastSuccessfulSyncTime
 
-# 2) 目标邮箱实际落库（权威数字）：邮件数 + 占用
-$s = Get-MailboxStatistics -Identity <目标邮箱>
-"$($s.ItemCount) / $($s.TotalItemSize)"
+# 2) 目标邮箱实际落库（权威数字）：邮件数 + 占用 —— 用固化脚本，勿用 ItemCount（口径见下节）
+. <技能目录>\scripts\exo_tasks.ps1
+Export-TargetStats -BatchId <批名>   # 本批次全部账号，约 1 分钟
 ```
 
-- 进度百分比 = 目标 `ItemCount` ÷ 源端 probe 基线总数（按大小同理）。
+- 进度百分比 = 目标**可见邮件数**（`target_stats.csv` 的 `ItemCount`）÷ 源端 probe 基线总数（按大小同理）；禁止用邮箱 `ItemCount`（含日历/隐藏项）。
 - `EstimatedTotalTransferSize` 是引擎"已发现项"的动态估计，会随枚举推进增长，**不是**源端总量；总量基准只用 probe 基线。
 - `SkippedItemCount > 0` 时导出批次错误报告核对（大邮件超限等）。
 - EAC/批次显示的"数据一致性分数"（如 Perfect）是**引擎内部自洽性指标**（已同步部分与 IMAP 所见一致），**不是完整度证明**——IMAP 视图被截断时它照样显示 Perfect。完整度唯一判据：目标侧落库 vs 源端 probe 基线（webmail 交叉验证过的）。
 - 引擎 `SyncedItemCount` 与目标 `ItemCount` 允许小幅偏差（时间差），大幅偏差（>5%）按核对口径排查。
 
-### 迁移数据汇总报告规范（Excel，全流程单一份）
+### 迁移数据汇总报告（Excel，全流程单一份）
 
-**定位**：进行中即为工作进度汇报，完成后同一结构即验收结果；不另设"验收报告"。脚本：`scripts/gen_migration_report.py`（参数 `--user-stats / --target-stats / --baseline / --out / --batch / --note`）。
+规范全文（表结构、列口径、数据源、生成前置提问口径、着色与列宽）见 `references/report-spec.md`。
 
-数据采集（EXO 会话内两条标准导出，见"目标端统计标准方法"与进度查询命令）：
-
-```powershell
-# 1) 逐用户引擎统计 -> user_stats.csv
-Get-MigrationUser -BatchId <批名> | ForEach-Object {
-    $st = Get-MigrationUserStatistics -Identity $_.Identity
-    [PSCustomObject]@{ EmailAddress = $_.Identity; Status = $_.Status
-        SyncedItemCount = $st.SyncedItemCount; SkippedItemCount = $st.SkippedItemCount
-        EstimatedTotalTransferSize = "$($st.EstimatedTotalTransferSize)"
-        LastSuccessfulSyncTime = $st.LastSuccessfulSyncTime } } |
-    Export-Csv <产物目录>\user_stats.csv -NoTypeInformation -Encoding UTF8
-
-# 2) 目标邮箱实际落库 -> target_stats.csv
-```
-
-Sheet 结构（两个固定 + 两个完成追加）：
-
-**Sheet2 迁移概要**（管理视角，只写管理层关心的数字）：账号总数、已完成、同步中、失败/停止、原邮箱邮件总数、原邮箱空间合计、目标邮箱邮件总数、目标邮箱空间合计、完成度（按邮件总数计）、完成度（按空间占用计）、跳过邮件合计、最近同步时间、更新时间。不放批次名等纯技术标识于正文之外。
-
-**Sheet2 迁移数据汇总**（默认打开即显示的首页，每账号一行），列序固定：
-用户名 → 原邮箱空间占用 → 目标邮箱空间占用 → 原邮箱邮件总数 → 目标邮箱邮件总数 → 完成度（按邮件总数计）→ 最近同步时间 → 本批次已同步 → 跳过邮件数 → 迁移状态 → 说明（最右列）。无源列即无法对账，禁止省略原邮箱两列；不设按空间计的完成度列。
-- 状态文案：已完成账号显示"已完成，增量同步中"（Synced 批次在 Complete 收尾前持续每 24h 增量，如实呈现）；同步中显示"同步中"。
-- 着色：完成度 <100% 的单元格标红色；跳过邮件数 >0 的单元格标红色。
-- **说明列**（自动生成）：完成度 >100% → "同步期间有新增邮件，故完成度超过100%"；跳过 >0 → "存在跳过邮件，待错误报告核对"；两者同时命中优先显示前者。
-- 打开时默认激活本 sheet。
-
-**生成前置（必做）**：生成报告前必须先询问用户"是否重新摸底源邮箱（邮件总数/空间占用），更新基线文件"——尤其验收环节；用户确认后先跑 probe 更新基线再生成报告，未确认可用现有基线出进度版。
-
-**完成后追加**：
-- Sheet3 文件夹对账：邮箱、文件夹名（UTF-7 解码）、匹配类型（直接/系统映射）、源邮件数、目标邮件数、差值、状态；匹配失败标"目标缺失/源缺失"，禁止静默丢行。
-- Sheet4 跳过明细：数据源为管理员邮箱错误报告邮件附件 CSV（PowerShell 无逐项接口）；字段：邮箱、用户名、主题、接收时间、所在文件夹、失败原因；无跳过保留表头+"无跳过项"。
-
-规范：
-1. `SkippedItemCount > 0` 的账号在概要备注点名，指向 Sheet4。
-2. 基线校准状态必须在备注写明（哪些账号为新基线、哪些为收取范围变更前旧基线待重校）。
-3. 引擎预估传输量不进报告（对管理无意义）；总量与进度一律以源基线为准。
-4. **输入 CSV 必须当次实时导出**（每次生成报告前都重新执行两条标准导出命令），禁止复用历史导出文件——过期数据会让"最近同步时间/完成度"全部失真且无从察觉。概要中的"更新时间"即数据时效，与报告生成时间一致。
-5. 密码与凭据字段禁止进入任何输入输出。
-6. 状态用中文业务词，禁用引擎术语（Synced/Syncing 等）直接呈现。
-7. **最近同步时间**：数据源为 `Get-MigrationUserStatistics` 的 **`LastSuccessfulSyncTime`**（勿用 `LastSyncedDateTime`——该字段长期为空，实测不可用）。注意两点：① 该值为 UTC，展示前必须转本地时区（EXO 导出的 DateTime 字符串无时区标记，按 UTC 处理）；② 个别账号可能仍为空，显示"首轮同步进行中"，禁止留空。
-8. **列宽规范**：所有列宽 ≥ max(表头显示宽度, 内容显示宽度) + 4（CJK 按 2 倍计）；生成脚本内置 `set_widths` 自动计算，禁止手工写死小于表头的列宽。
-9. EXO 返回的时间为 UTC（如 `StartDateTime`），展示前必须转本地时区。
-
+要点：只出两张表——**Sheet1 迁移概要** + **Sheet2 迁移数据汇总**（每账号一行，含原/目标两列以支持对账）；文件夹级对账与跳过邮件明细属诊断产物，**不进报告**。
 ### 源端统计标准方法（基线）
 
 1. 统计一律用 `probe` 脚本产出（逐文件夹 `SELECT readonly` + EXISTS 计数、SIZE 累加），结果落盘 CSV，禁止手写临时脚本另搞一套口径。
 2. **收取范围变更后必须重跑 probe 并与 webmail 对照验证生效**，两轮数字一致才算基线；"设置已保存"不等于"已生效"（实测存在生效延迟，期间 IMAP 只见部分邮件且无任何报错）。
 3. 基线三要素：邮件总数（probe 汇总）、文件夹数（probe 文件夹列表）、占用空间（probe SIZE 合计，与 webmail"已使用容量"交叉核对）。
+4. **基线只来自 `probe` 产物**：`email_check_success_*.csv`（账号级汇总，报告 `--baseline` 消费）与 `probe_report_*.csv`（逐文件夹明细，供人工核对与基线重建），默认落在 `--output` 根目录下的 `email-migration/` 子目录。迁移名单 CSV（如 password.csv）里的 `total_count/total_size/size_text(MB)` 是 `backfill` 回填的历史拷贝，只作参考，**不是基线**，禁止当基线用。
+5. **先复用，后重跑**：需要基线时先找 probe 产物 CSV，再查 `logs/probe_*.log`——日志含逐账号"文件夹 N 个/邮件总数/空间占用"与逐文件夹明细，可用 `scripts/rebuild_baseline_from_probe_log.py` 重建（封数精确，空间占用按日志小数位反算、有 ±几 KB 舍入误差）。已有可用基线就复用；是否重跑 probe **一律由用户决定**（提问口径见「迁移数据汇总报告规范」生成前置）。
 
-### 目标端统计标准方法
+### 目标端统计标准方法（口径见 `report-spec.md`「目标侧统计口径」）
 
-1. 邮箱级（邮件总数 + 占用）：
+**统一用 `scripts/exo_tasks.ps1` 的 `Export-TargetStats` / `Export-FolderStats`，不要手敲管道**——手敲极易踩下面 5 条（脚本已全部处理）：
 
-```powershell
-Get-Mailbox -ResultSize unlimited |
-    Where-Object { $_.PrimarySmtpAddress -like "*@<目标域名>.onmicrosoft.com" -and $_.PrimarySmtpAddress -notlike "*Discovery*" } |
-    ForEach-Object {
-        $addr = $_.PrimarySmtpAddress
-        $s = Get-MailboxStatistics -Identity $_.Identity
-        [PSCustomObject]@{ EmailAddress = $addr; ItemCount = $s.ItemCount; TotalItemSize = "$($s.TotalItemSize)" }
-    } |
-    Export-Csv -Path "<产物目录>\target_stats.csv" -NoTypeInformation -Encoding UTF8
-```
-
-2. 文件夹级（逐文件夹邮件数，与源端 probe 逐文件夹对账）：
-
-```powershell
-Get-MailboxFolderStatistics -Identity <目标邮箱> |
-    Select-Object @{N="EmailAddress";E={<目标邮箱>}}, FolderPath, ItemsInFolder |
-    Export-Csv -Path "<产物目录>\folder_stats.csv" -NoTypeInformation -Encoding UTF8
-```
-
-3. 本地解析 `TotalItemSize` 字符串提取字节数后，与源端基线做"总数 + 文件夹级"双层对比。
+1. **邮件数 = 邮件类文件夹的 `VisibleItemsInFolder` 之和**。
+   - 禁用 `Get-MailboxStatistics.ItemCount`：整个邮箱项数（含日历/联系人/系统项/隐藏项），实测把 3 封算成 8。
+   - 禁用 `ItemsInFolder`：含 `HiddenItemsInFolder`（迁移/系统写入的隐藏项，客户端看不见），实测把 3 封算成 11。
+2. **邮件类文件夹** = `Inbox / SentItems / DeletedItems / Drafts / JunkEmail / Outbox / UserCreated`；`Calendar / Contacts / Tasks / Journal / Notes / RecoverableItems*` 等一律不计。
+3. **两个必踩的坑**：① V3 `Get-EXOMailboxFolderStatistics` 的自建文件夹 `FolderType` 是 `User Created`（带空格），经典 cmdlet 是 `UserCreated`，比对前须去空白，否则整片自建文件夹被漏掉（实测 emma 少算 9,903 封）；② 系统自动挂的 `/日历/中国 节假日` 类型也是 `UserCreated`，须按**一级路径**排除（`$nonMailRoots`），否则多算 174 项。
+4. **`FolderSize` 是字符串**（如 `175.9 KB (180,074 bytes)`），取字节数用正则 `\(([\d,]+)\s+bytes\)`；没有 `ToBytes()` 方法。
+5. 已知口径差异：占用空间取邮件类文件夹 `FolderSize`，**含隐藏项**（EXO 无"仅可见项"体积接口），小邮箱会出现"源 0.0MB → 目标 0.2MB"，结论里说明即可。
 
 ### 源/目标核对口径
 
-1. probe 邮件数合计与目标 `ItemCount` 差值 ±2% 内视为一致（探测与同步存在时间差）。
+1. probe 邮件数合计与目标**可见邮件数**（`target_stats.csv` 的 `ItemCount`）差值 ±2% 内视为一致（探测与同步存在时间差）。
 2. 源端 IMAP 逐文件夹计数必须用 `SELECT(<文件夹>, readonly=True)` 后读 EXISTS；腾讯对含空格/特殊字符的文件夹名（如 `Sent Messages`）执行 STATUS 会报 BAD，且 imaplib 不自动加引号——文件夹名必须手动包双引号 `"'%s'" % name` 后再 SELECT。漏掉这类文件夹会造成数千封级别的统计缺口。
 3. 核对时源端大小基线以 webmail 后台"已使用容量"为准（IMAP 无可靠的总量 SIZE 接口）。
 2. 腾讯"收取范围"非"全部"时，IMAP 仅暴露近期邮件：后台显示容量远大于 IMAP 求和，且旧邮件静默不迁。迁移前必须确认为"全部"。
@@ -288,7 +247,7 @@ Test-MigrationServerAvailability -IMAP -RemoteServer "imap.exmail.qq.com" -Port 
 python skills/email/scripts/email_migration.py probe password.csv
 ```
 
-`probe` 会逐账号列出文件夹与邮件数并写报告到 output/email-migration/。报告为 probe_report_*.csv，共 5 列：`SourceEmail, FolderName, MailCount, MailSizeBytes, Status`（MailSizeBytes 为各文件夹占用字节；Status 为 OK / SELECT 失败 / SELECT 异常 / 失败:异常名:服务端返回信息，账号级连接失败时 FolderName 为空）。邮件总数明显偏小（如只有几十封）通常说明腾讯"收取范围"仍是"最近 30 天"，需先改设置再迁移。
+`probe` 会逐账号列出文件夹与邮件数并写报告到 output/email-migration/。报告为 probe_report_*.csv，共 5 列：`SourceEmail, FolderName, MailCount, MailSizeBytes, Status`（MailSizeBytes 为各文件夹占用字节；Status 为 OK / SELECT 失败 / SELECT 异常 / 失败:异常名:服务端返回信息，账号级连接失败时 FolderName 为空）。邮件总数明显偏小（如只有几十封）通常说明腾讯"收取范围"仍是"最近 30 天"，需先改设置再迁移。 脚本 `--output` 传**产物根目录**（默认 `output`），内部自动拼 `email-migration/` 子目录；传 `output/email-migration` 会得到嵌套目录，禁止。
 
 probe 同时生成逐账号汇总表 `email_check_success_<时间戳>.csv`（与探测报告同时间戳配对）：
 
@@ -468,12 +427,14 @@ Complete-MigrationBatch -Identity <批名> -Confirm:$false
 ```
 
 ```powershell
+# 固化命令（推荐）：EXO 会话内 . scripts/exo_tasks.ps1 后执行  Export-FolderStats -BatchId <批名>
+# 以下为等效的手工写法，供参考/排障
 # 导出文件夹统计到共享目录，用脚本生成核对报告
 # 注意：verify 脚本只识别 EmailAddress/FolderPath/ItemsInFolder 三列；
 # Get-Mailbox -Identity 返回 GUID、Get-MailboxFolderStatistics 不带邮箱地址，
 # 故用外层对象的 PrimarySmtpAddress 作 EmailAddress 列来区分邮箱。
 Get-Mailbox -ResultSize unlimited |
-    Where-Object { $_.PrimarySmtpAddress -like "*@sendike1.onmicrosoft.com" } |  # 按需过滤目标邮箱
+    Where-Object { $_.PrimarySmtpAddress -like "*@<目标域名>.onmicrosoft.com" } |  # 按需过滤目标邮箱
     ForEach-Object {
         $addr = $_.PrimarySmtpAddress
         Get-MailboxFolderStatistics -Identity $_.Identity |
@@ -484,6 +445,9 @@ Get-Mailbox -ResultSize unlimited |
 
 ```bash
 python skills/email/scripts/email_migration.py verify output/email-migration/folder_stats.csv
+
+# 汇总报告（固化入口：自动取最近一次摸底 CSV 及其更新时间，不重跑 probe）：
+# python skills/email/scripts/email_migration.py report --batch <批名> [--dry-run]
 ```
 
 人工核对：
