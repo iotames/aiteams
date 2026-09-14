@@ -36,6 +36,7 @@ workspace/
 .crush/
 .vscode/
 .idea/
+.zcode/
 *.swp
 *.swo
 reasonix.toml
