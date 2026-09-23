@@ -7,7 +7,7 @@
 ## 提取信息
 
 - **仓库**: https://github.com/code-yeongyu/oh-my-openagent
-- **分支**: `dev` (commit: `51c737d15`, 版本 4.19.3, as of 2026-07-31)
+- **分支**: `dev` (commit: `c775ef033`, 版本 5.0.0-beta.82+, as of 2026-09-22)
 - **提取方式**: 从 TypeScript 源码中的字符串常量 / Markdown prompt 文件直接复制
 - **语言**: 保留原始英文，未翻译未压缩
 - **许可证**: SUL-1.0 (上游仓库)
@@ -44,6 +44,16 @@
 - Sisyphus 上游有多个变体（claude-fable-5 / claude-opus-5 / claude-opus-4-8 / claude-opus-4-7 / gpt-5-4 / gpt-5-5 / kimi / gemini 等），此处提取的是 Claude Fable 5 变体。
 - Sisyphus-Junior 有多个模型变体（gemini, gpt-5-4, gpt-5-5, kimi-k2-6 等），此处提取的是 Claude 系列的 default 版本（`useTaskSystem=false`，TODO 模式）。
 - Hephaestus 仅支持 GPT 系列模型，上游有 gpt.ts / gpt-5-4 / gpt-5-5 / gpt-5-6 变体，此处提取的是通用 GPT fallback 版本（`gpt.ts`）。
+
+## 变更日志
+
+### 2026-09-22
+- 全量比对（4.19.3 → 5.0.0-beta.82+，commit `c775ef033`）：11 个角色全部保留、均未删除。未变 7 个：Sisyphus、Sisyphus-Junior、Oracle、Momus、Metis、Explore、Multimodal-Looker。
+- Atlas: REQUIRED TOOLS 移除 codegraph_*，改 lsp_* 为符号查询首选；`/start-work` 命令改名 `/ulw-execute`。
+- Prometheus: `/start-work` → `/ulw-execute`。
+- Librarian: 年份检查改动态表达式、context7 工具改名 `context7_query-docs`、清理多余表格头。
+- 上游拼装链路说明：5.0 新增的 `sisyphus-dynamic-prompt-*.ts` 系列仅用于 fallback prompt，claude-fable-5 主链路未变，提取口径不变。上游提示词层整体是演进而非重写；大变化集中在运行时架构（senpi 引擎 daemon、任务隔离、模型链 lane 路由）与独立版 OmO Native。
+- Hephaestus: 同步上游 dev（commit `c775ef033`）——核心模板仅 Todo Discipline 段有变化（旧 `<Todo_Discipline>` TODO OBSESSION 短版 → 完整 `## Todo Discipline (NON-NEGOTIABLE)` 段）；Hard Blocks、Anti-Patterns、Anti-Duplication、GPT File Edit Guidance 内联内容均未变；运行时 `${...}` 占位符 section 未纳入比对（其中 `buildParallelDelegationSection` 因 deep-low/deep-high 拆分有改动，但不在提取口径内）。origin 与中文译文已同步更新。
 
 ## 不收录的角色/模式说明
 

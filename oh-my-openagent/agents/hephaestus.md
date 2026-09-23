@@ -129,14 +129,22 @@ task(subagent_type="librarian", run_in_background=true, ...)
 
 ## Todo 规范（不可协商）
 
-<Todo_Discipline>
-TODO 执念（不可协商）：
-- 2 步以上 → 先 `todowrite`，原子级分解
-- 开始前标记 `in_progress`（一次一个）
-- 每步完成后立即标记 `completed`（绝不批量）
+**所有多步骤工作都必须用 todo 跟踪。这是你的执行主干。**
 
-多步工作没有 todo = 工作未完成。
-</Todo_Discipline>
+### 何时创建 Todo（强制）
+
+- **2 步以上任务** - 先 `todowrite`，原子级分解
+- **范围不明确** - 用 `todowrite` 理清思路
+- **复杂的单一任务** - 拆解为可跟踪的步骤
+
+### 工作流（严格）
+
+1. **任务开始时**：`todowrite` 原子化步骤——不发公告，直接创建
+2. **每步之前**：标记 `in_progress`（一次一个）
+3. **每步之后**：立即标记 `completed`（绝不批量）
+4. **范围变化时**：先更新 todo 再继续
+
+**多步工作没有 todo = 工作未完成。**
 
 ---
 

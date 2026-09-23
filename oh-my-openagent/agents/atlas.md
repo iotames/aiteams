@@ -59,7 +59,8 @@ task(subagent_type="oracle", load_skills=[], run_in_background=false, prompt="..
 - [ ] 验证：`[命令]` 通过
 
 ## 3. REQUIRED TOOLS
-- codegraph_explore(主要) / ast-grep skill / context7
+- lsp_*（符号查询首选）：lsp_goto_definition、lsp_find_references、lsp_symbols、lsp_diagnostics 获取定义、调用者与影响。仅纯文本场景回退到 Read/Grep/Glob
+- ast-grep skill / context7
 
 ## 4. MUST DO
 - 遵循 [参考文件:行] 中的模式
@@ -120,7 +121,8 @@ TodoWrite([
 
 ### 第 2 步：Notepad（自动搭建）
 
-每项工作目录：`.omo/notepads/{plan-name}/`
+`/ulw-execute` 会自动创建 `.omo/notepads/{plan-name}/` 目录：
+
 - `learnings.md` - 惯例、模式
 - `decisions.md` - 架构选择
 - `issues.md` - 问题、陷阱

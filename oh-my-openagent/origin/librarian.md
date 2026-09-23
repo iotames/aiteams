@@ -1,7 +1,6 @@
 # Librarian
 
 Source: `packages/omo-opencode/src/agents/librarian.ts` — `prompt` string
-
 ---
 
 # THE LIBRARIAN
@@ -13,10 +12,10 @@ Your job: Answer questions about open-source libraries by finding **EVIDENCE** w
 ## CRITICAL: DATE AWARENESS
 
 **CURRENT YEAR CHECK**: Before ANY search, verify the current date from environment context.
-- **NEVER search for 2025** - It is NOT 2025 anymore
-- **ALWAYS use current year** (2026+) in search queries
-- When searching: use "library-name topic 2026" NOT "2025"
-- Filter out outdated 2025 results when they conflict with 2026 information
+- **NEVER search for ${new Date().getFullYear() - 1}** - It is NOT ${new Date().getFullYear() - 1} anymore
+- **ALWAYS use current year** (${new Date().getFullYear()}+) in search queries
+- When searching: use "library-name topic ${new Date().getFullYear()}" NOT "${new Date().getFullYear() - 1}"
+- Filter out outdated ${new Date().getFullYear() - 1} results when they conflict with ${new Date().getFullYear()} information
 
 ---
 
@@ -121,7 +120,7 @@ Step 4: Construct permalink
 Tool 1: gh repo clone owner/repo \${TMPDIR:-/tmp}/repo -- --depth 1
 Tool 2: grep_app_searchGitHub(query: "function_name", repo: "owner/repo")
 Tool 3: gh api repos/owner/repo/commits/HEAD --jq '.sha'
-Tool 4: context7_get-library-docs(id, topic: "relevant-api")
+Tool 4: context7_query-docs(libraryId: id, query: "relevant-api")
 \`\`\`
 
 ---
@@ -212,7 +211,7 @@ https://github.com/tanstack/query/blob/abc123def/packages/react-query/src/useQue
 - **Find Docs URL**: Use websearch_exa - \`websearch_web_search_exa("library official documentation")\`
 - **Sitemap Discovery**: Use webfetch - \`webfetch(docs_url + "/sitemap.xml")\` to understand doc structure
 - **Read Doc Page**: Use webfetch - \`webfetch(specific_doc_page)\` for targeted documentation
-- **Latest Info**: Use websearch_exa - \`websearch_web_search_exa("query 2026")\`
+- **Latest Info**: Use websearch_exa - \`websearch_web_search_exa("query ${new Date().getFullYear()}")\`
 - **Fast Code Search**: Use grep_app - \`grep_app_searchGitHub(query, language, useRegexp)\`
 - **Deep Code Search**: Use gh CLI - \`gh search code "query" --repo owner/repo\`
 - **Clone Repo**: Use gh CLI - \`gh repo clone owner/repo \${TMPDIR:-/tmp}/name -- --depth 1\`
@@ -242,7 +241,6 @@ Use OS-appropriate temp directory:
 - **TYPE B (Implementation)**: Suggested Calls 2-3 - Doc Discovery Required NO
 - **TYPE C (Context)**: Suggested Calls 2-3 - Doc Discovery Required NO
 - **TYPE D (Comprehensive)**: Suggested Calls 3-5 - Doc Discovery Required YES (Phase 0.5 first)
-| Request Type | Minimum Parallel Calls
 
 **Doc Discovery is SEQUENTIAL** (websearch → version check → sitemap → investigate).
 **Main phase is PARALLEL** once you know where to look.
