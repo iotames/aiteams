@@ -77,11 +77,17 @@ def chromedp_find_chrome(browser="auto"):
             # 常需 --no-sandbox，由 chromedp_launch 统一追加。
             return ([], candidate)
         if os.path.isdir(candidate):
-            for name in ("chrome", "google-chrome", "chromium", "chromium-browser",
-                         "microsoft-edge", "msedge", "chrome.exe", "msedge.exe"):
-                p = os.path.join(candidate, name)
-                if os.path.isfile(p) and os.access(p, os.X_OK):
-                    return ([], p)
+            # 二进制名 × 常见相对子目录：deepin/麒麟的 /opt/apps/<pkg> 目录本身不含
+            # 可执行文件，真实路径在 files/google/chrome/chrome 一层或多层之下。
+            names = ("chrome", "google-chrome", "chromium", "chromium-browser",
+                     "microsoft-edge", "msedge", "chrome.exe", "msedge.exe")
+            subdirs = ("", "files/google/chrome", "files/bin/google/chrome",
+                       "files/bin", "google/chrome", "chrome-linux64")
+            for sub in subdirs:
+                for name in names:
+                    p = os.path.join(candidate, sub, name)
+                    if os.path.isfile(p) and os.access(p, os.X_OK):
+                        return ([], p)
         if os.path.isfile(candidate):
             # 存在但不可执行：给出更明确的报错，避免最后用非法文件去启动。
             raise ValueError(f"browser file is not executable: {candidate!r}")
@@ -275,13 +281,19 @@ class CDPClient:
                 f"Cannot connect to CDP at {self.host}:{self.port}: {e}"
             )
 
+        # 只挑 page 类型目标：service_worker / worker 的 url 里同样可能含过滤词，
+        # 连上去后 Page.enable 之类命令会失败或直接挂住。
+        pages = [t for t in tabs if t.get("type") == "page"]
         target = None
         if url_filter:
-            for t in tabs:
+            for t in pages:
                 if url_filter in t.get("url", ""):
                     target = t
                     break
+        if not target and pages:
+            target = pages[0]
         if not target and tabs:
+            # 退一步：确实没有任何 page 时才用其他类型，避免完全连不上。
             target = tabs[0]
         if not target:
             raise CDPConnectionError(f"No page found on CDP port {self.port}")

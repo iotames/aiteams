@@ -7,7 +7,7 @@ description: >-
   也适用于填写表单、点击按钮、检查网络请求、提取页面信息等浏览器自动化操作。
   自动检测系统已安装的 Chrome/Edge，通过远程调试接口 WebSocket 连接，极轻量无额外依赖。
 metadata:
-  version: 1.0.0
+  version: 1.1.0
 ---
 
 ## 设计原则
@@ -39,6 +39,7 @@ prefix, binary_path = chromedp_find_chrome(browser="/opt/apps/cn.google.chrome-p
 
 自动检测系统已安装的 Chrome/Edge（支持 Linux 和 Windows，含 deepin `/opt/apps/cn.google.chrome-pre/` 等非标准路径）。
 使用 `browser="chrome"` 或 `browser="edge"` 指定浏览器类型；**`browser` 也可直接传可执行文件路径或所在目录**（技能找不到时先试这个，再问用户）。传目录时自动在目录内查找常见浏览器二进制名（含 `microsoft-edge`），Windows 下兼容 `chrome.exe`/`msedge.exe`；传可执行文件路径时须为可执行文件。
+⚠️ deepin/麒麟的 `/opt/apps/<包名>` 目录本身**不含**可执行文件，真实二进制在 `files/google/chrome/chrome` 等子目录下；传这类目录时技能会自动下探常见子目录。若报 `browser path not found`，直接传完整可执行文件路径。
 如果找不到，**必须问用户**，不要直接放弃。
 
 ### 2. 启动 Chrome
@@ -68,6 +69,9 @@ proc = chromedp_launch(browser="/opt/apps/cn.google.chrome-pre/files/google/chro
 
 ```python
 client = CDPClient(port=9222, url_filter="127.0.0.1:5000")
+
+# url_filter 只在 type=="page" 的标签页里匹配；匹配不到时退化为第一个 page 标签页。
+# 页面开有多个同域标签页时，用能唯一区分的那段 URL 做过滤（如路径里的 id），否则会连错页。
 
 # 截图
 client.screenshot("/tmp/page.png")
@@ -305,3 +309,5 @@ errors = client.get_console_errors(timeout=1)
 4. **`evaluate` 是核心工具** — 可以读 DOM、调 API、触发事件，比截图有用
 5. **杀 Chrome（Linux）用 `killall -9 chrome`** — `pkill -f "pattern"` 和 `ps | awk | xargs kill` 在有大量子进程（renderer/gpu/utility）时极慢（>10s），因为逐个匹配和发信号。`killall -9 chrome` 一次杀所有 `chrome` 命名进程，<1s。注意也会杀 VS Code 等嵌入 Chrome，在自动化测试环境无影响。Windows 环境见下一条。
 6. **Windows 关闭浏览器用 `proc.terminate()`** — Windows 上 `os.kill(pid, signal.SIGTERM)` 可能无法正确终止进程树，优先使用 `proc.terminate()` 或 `taskkill /f /pid`。前面所有示例已按平台统一处理。
+7. **长时间采集网络请求时，用裸 WebSocket 自己收发，不要套 `CDPClient`** — `CDPClient._recv_response` 会为每条命令循环收包直到等到对应 id，采集期（如 reload 后观察 30s 网络）容易与之互相阻塞。裸连后设置 `ws.settimeout(1)` 循环 `recv()`，把事件收集完再解析，是最稳的形态。
+8. **`Page.addScriptToEvaluateOnNewDocument` 注入的钩子只作用于主线程，且只在 reload 之后生效** — 想把钩子提前于页面脚本装好，必须先 `addScriptToEvaluateOnNewDocument` 再 `Page.reload()`。Worker/Service Worker 里的代码不受其影响，需要另行用 `Target.setAutoAttach` 附加，或在主线程钩住 `Worker.prototype.postMessage` / `Worker` 构造函数来观察跨线程消息。
