@@ -54,3 +54,6 @@ Thumbs.db
 .ruff_cache/
 
 password*
+
+_tmp_*
+_temp_*
